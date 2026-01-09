@@ -9,6 +9,7 @@ interface DashboardProps {
     onLogout: () => void;
     onResync: () => void;
     onEditCourses: () => void;
+    onOpenSettings?: () => void;
     loading?: boolean;
     isAdmin?: boolean;
 }
@@ -20,7 +21,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     onLogout,
     onResync,
     onEditCourses,
+    onOpenSettings,
     loading,
+    isAdmin,
 }) => {
     const activeEvents = scheduleEvents.filter(e => !e.isCancelled);
     const cancelledEvents = scheduleEvents.filter(e => e.isCancelled);
@@ -49,6 +52,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
 
                     <div className="header-actions">
+                        {isAdmin && onOpenSettings && (
+                            <button className="btn btn-secondary" onClick={onOpenSettings}>
+                                ⚙️ Settings
+                            </button>
+                        )}
                         <button className="btn btn-secondary" onClick={onEditCourses}>
                             Edit Courses
                         </button>

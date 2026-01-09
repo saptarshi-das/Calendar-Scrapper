@@ -380,6 +380,10 @@ function App() {
             {error}
           </div>
         )}
+
+        {showSettings && isAdmin && (
+          <AdminSettings onClose={() => setShowSettings(false)} />
+        )}
       </div>
     );
   }
@@ -424,6 +428,7 @@ function App() {
           onLogout={handleLogout}
           onResync={handleResync}
           onEditCourses={() => setAppState('select-courses')}
+          onOpenSettings={() => setShowSettings(true)}
           loading={loading}
           isAdmin={isAdmin}
         />
