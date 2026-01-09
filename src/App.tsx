@@ -5,6 +5,7 @@ import LoginPage from './components/LoginPage';
 import CourseSelector from './components/CourseSelector';
 import CalendarPreview from './components/CalendarPreview';
 import Dashboard from './components/Dashboard';
+import { AdminSettings } from './components/AdminSettings';
 import type { Course, User, ScheduleEvent } from './types';
 import { SheetScraperService } from './services/sheetScraper';
 import { GoogleCalendarService } from './services/googleCalendar';
@@ -25,6 +26,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -134,6 +136,37 @@ function App() {
         // Initialize Google Calendar API with the access token
         await GoogleCalendarService.initializeGAPI();
         GoogleCalendarService.setAccessToken(accessToken);
+
+        // If admin, save OAuth tokens for Cloud Function to use
+        if (result.user && FirestoreService.isAdmin(result.user.email || '')) {
+          // Get refresh token from the OAuth response
+          // Note: Firebase doesn't expose refresh token directly, but we can get it from user credential
+          const oauthCredential = credential as any;
+          const refreshToken = oauthCredential.refreshToken || result.user.refreshToken;
+
+          if (refreshToken) {
+            // Calculate token expiry (typically 1 hour from now)
+            const expiresAt = new Date(Date.now() + 3600 * 1000);
+
+            await FirestoreService.saveAdminOAuthTokens(
+              result.user.uid,
+              accessToken,
+              refreshToken,
+              expiresAt
+            );
+            console.log('✅ Admin OAuth tokens saved for Cloud Function');
+
+            // Initialize sheet URL if not set
+            const currentSheetUrl = await FirestoreService.getScheduleSheetUrl();
+            if (!currentSheetUrl) {
+              const defaultSheetUrl = 'https://docs.google.com/spreadsheets/d/1e3p34_yQCwWjeWeUkESr1TR5y0zoelkjfSUWfBSP7Y4/edit';
+              await FirestoreService.updateScheduleSheetUrl(defaultSheetUrl);
+              console.log('✅ Default sheet URL initialized');
+            }
+          } else {
+            console.warn('⚠️ Could not get refresh token - Cloud Function may not work');
+          }
+        }
       } else {
         throw new Error('Failed to get Google access token. Please try again.');
       }
@@ -318,9 +351,17 @@ function App() {
                 <span className="admin-badge badge badge-warning">Admin</span>
               )}
             </div>
-            <button className="btn btn-secondary" onClick={handleLogout}>
-              Logout
-            </button>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              {isAdmin && (
+                <button className="btn btn-secondary" onClick={() => setShowSettings(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  ⚙️ Settings
+                </button>
+              )}
+              <button className="btn btn-secondary" onClick={handleLogout}>
+                Logout
+              </button>
+            </div>
           </div>
         </header>
 
@@ -375,16 +416,22 @@ function App() {
 
   if (appState === 'dashboard') {
     return (
-      <Dashboard
-        user={user!}
-        selectedCourses={selectedCourses}
-        scheduleEvents={scheduleEvents}
-        onLogout={handleLogout}
-        onResync={handleResync}
-        onEditCourses={() => setAppState('select-courses')}
-        loading={loading}
-        isAdmin={isAdmin}
-      />
+      <>
+        <Dashboard
+          user={user!}
+          selectedCourses={selectedCourses}
+          scheduleEvents={scheduleEvents}
+          onLogout={handleLogout}
+          onResync={handleResync}
+          onEditCourses={() => setAppState('select-courses')}
+          loading={loading}
+          isAdmin={isAdmin}
+        />
+
+        {showSettings && isAdmin && (
+          <AdminSettings onClose={() => setShowSettings(false)} />
+        )}
+      </>
     );
   }
 

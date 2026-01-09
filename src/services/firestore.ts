@@ -230,4 +230,82 @@ export class FirestoreService {
             return null;
         }
     }
+
+    /**
+     * Save admin user's OAuth tokens for Cloud Function to use
+     */
+    static async saveAdminOAuthTokens(
+        userId: string,
+        accessToken: string,
+        refreshToken: string,
+        expiresAt: Date
+    ): Promise<void> {
+        try {
+            const configRef = doc(db, 'config', 'adminUser');
+            await setDoc(configRef, {
+                userId,
+                oauthTokens: {
+                    accessToken,
+                    refreshToken,
+                    expiresAt,
+                },
+                lastUpdated: serverTimestamp(),
+            });
+
+            console.log('Admin OAuth tokens saved for Cloud Function');
+        } catch (error) {
+            console.error('Error saving admin tokens:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get current schedule sheet URL/ID
+     */
+    static async getScheduleSheetUrl(): Promise<string | null> {
+        try {
+            const configRef = doc(db, 'config', 'settings');
+            const configDoc = await getDoc(configRef);
+
+            if (configDoc.exists()) {
+                return configDoc.data().scheduleSheetUrl || null;
+            }
+
+            return null;
+        } catch (error) {
+            console.error('Error fetching sheet URL:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Update schedule sheet URL (admin only)
+     */
+    static async updateScheduleSheetUrl(sheetUrl: string): Promise<void> {
+        try {
+            // Extract sheet ID from URL
+            const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+            if (!match) {
+                throw new Error('Invalid Google Sheets URL');
+            }
+
+            const sheetId = match[1];
+
+            const configRef = doc(db, 'config', 'settings');
+            await setDoc(
+                configRef,
+                {
+                    scheduleSheetUrl: sheetUrl,
+                    scheduleSheetId: sheetId,
+                    lastUpdated: serverTimestamp(),
+                },
+                { merge: true }
+            );
+
+            console.log('Schedule sheet URL updated:', sheetUrl);
+        } catch (error) {
+            console.error('Error updating sheet URL:', error);
+            throw error;
+        }
+    }
 }

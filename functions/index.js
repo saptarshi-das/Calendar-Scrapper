@@ -1,13 +1,15 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const { google } = require("googleapis");
 
 admin.initializeApp();
 
-// Configuration from environment
-const SHEET_ID = "1glNcxkwh4XspG3sz3UYAsFGnLP_54rlvNBkjtcl9SGM";
+// Configuration - ACTUAL RESTRICTED SHEET
+const SHEET_ID = "1jis4IowMXM72jJUlz3Yanv2YBu7ilcvU";
 const GID = "0";
+const SHEET_NAME = "Sheet1"; // Adjust if needed
 
 /**
  * Parse CSV data into 2D array
@@ -455,11 +457,73 @@ exports.dailyCalendarSync = onSchedule({
     try {
         const db = admin.firestore();
 
-        // 1. Scrape latest schedule
-        const csvURL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${GID}`;
-        const response = await axios.get(csvURL);
-        const rawData = parseCSV(response.data);
-        console.log(`📊 Scraped ${rawData.length} rows from sheet`);
+        // 1. Load sheet ID from configuration
+        console.log("📋 Loading sheet configuration...");
+        const configDoc = await db.collection("config").doc("settings").get();
+
+        if (!configDoc.exists) {
+            throw new Error("Configuration not found. Please set the sheet URL in the admin panel.");
+        }
+
+        const config = configDoc.data();
+        const CURRENT_SHEET_ID = config.scheduleSheetId;
+
+        if (!CURRENT_SHEET_ID) {
+            throw new Error("Sheet ID not configured. Please set it in the admin panel.");
+        }
+
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}`);
+
+        // 2. Get admin user's OAuth token from Firestore
+        console.log("🔐 Loading admin credentials...");
+        const adminConfigDoc = await db.collection("config").doc("adminUser").get();
+
+        if (!adminConfigDoc.exists) {
+            throw new Error("Admin user not configured. Please log in to the app as admin first.");
+        }
+
+        const adminConfig = adminConfigDoc.data();
+        let accessToken = adminConfig.oauthTokens?.accessToken;
+        const refreshToken = adminConfig.oauthTokens?.refreshToken;
+        const expiresAt = adminConfig.oauthTokens?.expiresAt?.toDate();
+
+        // Refresh token if expired
+        if (!accessToken || (expiresAt && expiresAt < new Date())) {
+            console.log("🔄 Refreshing admin token...");
+            const oauth2Client = new google.auth.OAuth2(
+                process.env.VITE_GOOGLE_CLIENT_ID,
+                process.env.VITE_GOOGLE_CLIENT_SECRET,
+            );
+
+            oauth2Client.setCredentials({
+                refresh_token: refreshToken,
+            });
+
+            const { credentials } = await oauth2Client.refreshAccessToken();
+            accessToken = credentials.access_token;
+
+            // Update stored token
+            await db.collection("config").doc("adminUser").update({
+                "oauthTokens.accessToken": accessToken,
+                "oauthTokens.expiresAt": new Date(credentials.expiry_date),
+            });
+        }
+
+        // 3. Fetch restricted sheet using admin's OAuth token and dynamic sheet ID
+        console.log("📊 Fetching restricted sheet data...");
+
+        const sheets = google.sheets({ version: "v4" });
+        const auth = new google.auth.OAuth2();
+        auth.setCredentials({ access_token: accessToken });
+
+        const response = await sheets.spreadsheets.values.get({
+            auth,
+            spreadsheetId: CURRENT_SHEET_ID,
+            range: `${SHEET_NAME}!A1:Z200`,
+        });
+
+        const rawData = response.data.values || [];
+        console.log(`📊 Fetched ${rawData.length} rows from restricted sheet`);
 
         // 2. Extract courses
         const courses = extractCourses(rawData);
