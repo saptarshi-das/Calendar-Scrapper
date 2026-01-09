@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Course, ScheduleEvent, TimeSlot } from '../types';
+import type { Course, ScheduleEvent, TimeSlot } from '../types';
 
 const SHEET_ID = import.meta.env.VITE_SCHEDULE_SHEET_ID;
 const GID = import.meta.env.VITE_SCHEDULE_SHEET_GID;
@@ -70,15 +70,16 @@ export class SheetScraperService {
             for (let j = 2; j < row.length; j++) {
                 const cell = row[j];
                 if (cell && typeof cell === 'string') {
-                    // Extract course codes (format: "COURSE (SECTION)")
-                    const matches = cell.match(/([A-Z&-]+)\s*\(([^)]+)\)/g);
+                    // Extract course codes (format: "Fintech-B (PT-1-2)")
+                    // Pattern: CourseName-Section (Location)
+                    const matches = cell.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/g);
 
                     if (matches) {
                         matches.forEach(match => {
-                            const courseMatch = match.match(/([A-Z&-]+)\s*\(([^)]+)\)/);
+                            const courseMatch = match.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
                             if (courseMatch) {
-                                const [_, courseName, section] = courseMatch;
-                                const code = `${courseName} (${section})`;
+                                const [_, courseName, section, location] = courseMatch;
+                                const code = `${courseName}-${section} (${location})`;
 
                                 if (!coursesSet.has(code)) {
                                     coursesSet.add(code);
@@ -87,6 +88,7 @@ export class SheetScraperService {
                                         code: code,
                                         name: courseName,
                                         section: section,
+                                        location: location,
                                     });
                                 }
                             }
@@ -210,21 +212,23 @@ export class SheetScraperService {
             // Check for strikethrough (would need HTML parsing)
             const hasStrikethrough = false; // Will be implemented with proper Sheets API
 
-            // Extract course code
-            const courseMatch = line.match(/([A-Z&-]+)\s*\(([^)]+)\)/);
+            // Extract course code (format: "Fintech-B (PT-1-2)")
+            const courseMatch = line.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
             if (courseMatch) {
-                const [_, courseName, section] = courseMatch;
-                const courseCode = `${courseName} (${section})`;
+                const [_, courseName, section, location] = courseMatch;
+                const courseCode = `${courseName}-${section} (${location})`;
 
                 // Only include if user selected this course
                 if (selectedCourses.includes(courseCode)) {
                     // Extract professor name (text after course code)
-                    const professor = line.replace(/([A-Z&-]+)\s*\([^)]+\)/, '').trim();
+                    const professor = line.replace(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\([^)]+\)/, '').trim();
 
                     const event: ScheduleEvent = {
                         id: `${courseCode}-${date.toISOString()}-${timeSlot.start}`,
                         courseCode,
                         courseName,
+                        section,
+                        location,
                         professor,
                         date,
                         timeSlot,

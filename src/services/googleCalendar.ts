@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ScheduleEvent } from '../types';
+import type { ScheduleEvent } from '../types';
 
 declare global {
     interface Window {
@@ -46,8 +46,8 @@ export class GoogleCalendarService {
     }
 
     /**
-     * Create a calendar event
-     */
+   * Create a calendar event
+   */
     static async createEvent(
         event: ScheduleEvent,
         calendarId: string = 'primary'
@@ -57,8 +57,10 @@ export class GoogleCalendarService {
             const endDateTime = this.createDateTime(event.date, event.timeSlot.end);
 
             const calendarEvent = {
-                summary: `${event.courseName} - ${event.professor}`,
-                description: `Course: ${event.courseCode}\nProfessor: ${event.professor}\nWeek: ${event.week}`,
+                summary: `${event.courseName}-${event.section}`, // e.g., "Fintech-B"
+                location: event.location, // e.g., "PT-1-2"
+                description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}${event.isCancelled ? '\n\n⚠️ CLASS CANCELLED' : ''
+                    }`,
                 start: {
                     dateTime: startDateTime,
                     timeZone: 'Asia/Kolkata',
@@ -102,8 +104,9 @@ export class GoogleCalendarService {
             const endDateTime = this.createDateTime(event.date, event.timeSlot.end);
 
             const calendarEvent = {
-                summary: `${event.courseName} - ${event.professor}`,
-                description: `Course: ${event.courseCode}\nProfessor: ${event.professor}\nWeek: ${event.week}${event.isCancelled ? '\n\n⚠️ CLASS CANCELLED' : ''
+                summary: `${event.courseName}-${event.section}`, // e.g., "Fintech-B"
+                location: event.location, // e.g., "PT-1-2"
+                description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}${event.isCancelled ? '\n\n⚠️ CLASS CANCELLED' : ''
                     }`,
                 start: {
                     dateTime: startDateTime,

@@ -156,7 +156,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 <div key={event.id} className="event-card glass-card">
                                     <div className="event-header">
                                         <div className="event-course">
-                                            <h3>{event.courseName}</h3>
+                                            <h3>{event.courseName}-{event.section}</h3>
                                             <span className="badge badge-info">{event.courseCode}</span>
                                         </div>
                                         <span className="event-date">{formatDate(event.date)}</span>
@@ -188,6 +188,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                                                 <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="2" />
                                             </svg>
                                             <span>{event.professor}</span>
+                                        </div>
+
+                                        <div className="event-detail">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                <circle cx="12" cy="10" r="3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                            </svg>
+                                            <span>{event.location}</span>
                                         </div>
                                     </div>
                                 </div>

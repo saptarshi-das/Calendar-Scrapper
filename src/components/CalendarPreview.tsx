@@ -117,7 +117,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
 
                                 <div className="event-content">
                                     <div className="event-title-row">
-                                        <h4>{event.courseName}</h4>
+                                        <h4>{event.courseName}-{event.section}</h4>
                                         {event.isCancelled && (
                                             <span className="badge badge-error">Cancelled</span>
                                         )}
@@ -135,6 +135,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
 
                                     <div className="event-meta">
                                         <span>👨‍🏫 {event.professor}</span>
+                                        <span>📍 {event.location}</span>
                                         <span className="course-code">{event.courseCode}</span>
                                     </div>
                                 </div>
@@ -163,8 +164,8 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                                                 {formatTime(event.timeSlot.start)}
                                             </div>
                                             <div className="event-info">
-                                                <strong>{event.courseName}</strong>
-                                                <span>{event.professor}</span>
+                                                <strong>{event.courseName}-{event.section}</strong>
+                                                <span>📍 {event.location} • {event.professor}</span>
                                             </div>
                                             {event.isCancelled && (
                                                 <span className="cancel-badge">✕</span>

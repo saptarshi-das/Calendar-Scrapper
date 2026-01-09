@@ -7,9 +7,10 @@ export interface User {
 
 export interface Course {
     id: string;
-    code: string; // e.g., "LETV (PT-1-2)"
-    name: string; // e.g., "LETV"
-    section: string; // e.g., "PT-1-2"
+    code: string; // e.g., "Fintech-B (PT-1-2)"
+    name: string; // e.g., "Fintech"
+    section: string; // e.g., "B"
+    location: string; // e.g., "PT-1-2"
     professor?: string;
 }
 
@@ -22,6 +23,8 @@ export interface ScheduleEvent {
     id: string;
     courseCode: string;
     courseName: string;
+    section: string; // e.g., "B"
+    location: string; // e.g., "PT-1-2"
     professor: string;
     date: Date;
     timeSlot: TimeSlot;
