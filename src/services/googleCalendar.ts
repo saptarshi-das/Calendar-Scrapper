@@ -59,8 +59,7 @@ export class GoogleCalendarService {
             const calendarEvent = {
                 summary: `${event.courseName}-${event.section}`, // e.g., "Fintech-B"
                 location: event.location, // e.g., "PT-1-2"
-                description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}${event.isCancelled ? '\n\n⚠️ CLASS CANCELLED' : ''
-                    }`,
+                description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}`,
                 start: {
                     dateTime: startDateTime,
                     timeZone: 'Asia/Kolkata',
@@ -69,7 +68,7 @@ export class GoogleCalendarService {
                     dateTime: endDateTime,
                     timeZone: 'Asia/Kolkata',
                 },
-                colorId: event.isCancelled ? '11' : '9', // Red for cancelled, blue for active
+                colorId: '9', // Blue for all active classes
                 extendedProperties: {
                     private: {
                         scheduleEventId: event.id,
@@ -106,8 +105,7 @@ export class GoogleCalendarService {
             const calendarEvent = {
                 summary: `${event.courseName}-${event.section}`, // e.g., "Fintech-B"
                 location: event.location, // e.g., "PT-1-2"
-                description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}${event.isCancelled ? '\n\n⚠️ CLASS CANCELLED' : ''
-                    }`,
+                description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}`,
                 start: {
                     dateTime: startDateTime,
                     timeZone: 'Asia/Kolkata',
@@ -116,7 +114,7 @@ export class GoogleCalendarService {
                     dateTime: endDateTime,
                     timeZone: 'Asia/Kolkata',
                 },
-                colorId: event.isCancelled ? '11' : '9',
+                colorId: '9', // Blue for all active classes
                 extendedProperties: {
                     private: {
                         scheduleEventId: event.id,

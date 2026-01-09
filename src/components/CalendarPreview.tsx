@@ -200,8 +200,10 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                             changes
                         </li>
                         <li>
-                            ❌ Cancelled classes will be marked in red and updated
-                            automatically
+                            ❌ Cancelled classes will be removed from your calendar automatically
+                        </li>
+                        <li>
+                            ➕ New classes will be added to your calendar when they appear in the schedule
                         </li>
                         <li>
                             ⚙️ You can edit your course selection anytime from the dashboard

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, GoogleAuthProvider } from 'firebase/auth';
 import { auth, googleProvider } from './firebase';
 import LoginPage from './components/LoginPage';
 import CourseSelector from './components/CourseSelector';
@@ -24,6 +24,7 @@ function App() {
   const [previewEvents, setPreviewEvents] = useState<ScheduleEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -55,6 +56,8 @@ function App() {
           await loadDashboardData(userSelection.selectedCourses);
         } else {
           // New user, load courses for selection
+          // Note: On auth state change, we don't have the access token yet
+          // User will need to provide it via login button or we'll use CSV fallback
           await loadCourses(firebaseUser);
         }
       } else {
@@ -66,14 +69,14 @@ function App() {
     return () => unsubscribe();
   }, []);
 
-  const loadCourses = async (firebaseUser: FirebaseUser) => {
+  const loadCourses = async (firebaseUser: FirebaseUser, accessToken?: string) => {
     try {
       setLoading(true);
 
       // If admin, scrape and save to Firestore
       if (FirestoreService.isAdmin(firebaseUser.email || '')) {
-        const token = await firebaseUser.getIdToken();
-        const rawData = await SheetScraperService.fetchSheetData(token);
+        // Use the Google OAuth access token, not Firebase ID token
+        const rawData = await SheetScraperService.fetchSheetData(accessToken || googleAccessToken || undefined);
         const extractedCourses = SheetScraperService.extractCourses(rawData);
         const allEvents = SheetScraperService.parseScheduleEvents(
           rawData,
@@ -122,10 +125,18 @@ function App() {
 
       const result = await signInWithPopup(auth, googleProvider);
 
-      // Initialize Google Calendar API
-      const token = await result.user.getIdToken();
-      await GoogleCalendarService.initializeGAPI();
-      GoogleCalendarService.setAccessToken(token);
+      // Get the Google OAuth access token from credentials
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const accessToken = credential?.accessToken;
+
+      if (accessToken) {
+        setGoogleAccessToken(accessToken);
+        // Initialize Google Calendar API with the access token
+        await GoogleCalendarService.initializeGAPI();
+        GoogleCalendarService.setAccessToken(accessToken);
+      } else {
+        throw new Error('Failed to get Google access token. Please try again.');
+      }
 
     } catch (err: any) {
       console.error('Login error:', err);
@@ -179,14 +190,20 @@ function App() {
       const firebaseUser = auth.currentUser;
       if (!firebaseUser) return;
 
-      const token = await firebaseUser.getIdToken();
+      if (!googleAccessToken) {
+        throw new Error('No access token available. Please log in again.');
+      }
 
       // Initialize Google Calendar API
       await GoogleCalendarService.initializeGAPI();
-      GoogleCalendarService.setAccessToken(token);
+      GoogleCalendarService.setAccessToken(googleAccessToken);
+
+      // Filter out cancelled events - we don't want them in the calendar
+      const activeEvents = previewEvents.filter(e => !e.isCancelled);
+      console.log(`Syncing ${activeEvents.length} active events (${previewEvents.length - activeEvents.length} cancelled events excluded)`);
 
       // Sync to Google Calendar
-      const syncStats = await GoogleCalendarService.syncEvents(previewEvents);
+      const syncStats = await GoogleCalendarService.syncEvents(activeEvents);
       console.log('Initial sync completed:', syncStats);
 
       // Save user preferences to Firestore
@@ -198,14 +215,14 @@ function App() {
 
       // Mark as synced with calendar event IDs
       const calendarEventIds: Record<string, string> = {};
-      previewEvents.forEach(event => {
+      activeEvents.forEach(event => {
         if (event.calendarEventId) {
           calendarEventIds[event.id] = event.calendarEventId;
         }
       });
       await FirestoreService.markUserAsSynced(user.uid, calendarEventIds);
 
-      setScheduleEvents(previewEvents);
+      setScheduleEvents(activeEvents);
       setAppState('dashboard');
 
     } catch (err: any) {
@@ -233,8 +250,7 @@ function App() {
 
       // If admin, re-scrape and update Firestore
       if (isAdmin) {
-        const token = await firebaseUser.getIdToken();
-        const rawData = await SheetScraperService.fetchSheetData(token);
+        const rawData = await SheetScraperService.fetchSheetData(googleAccessToken || undefined);
         const extractedCourses = SheetScraperService.extractCourses(rawData);
         const allEvents = SheetScraperService.parseScheduleEvents(
           rawData,
@@ -246,14 +262,20 @@ function App() {
 
       // Reload events from Firestore
       const events = await FirestoreService.getScheduleEventsForCourses(selectedCourses);
-      setScheduleEvents(events);
+
+      // Filter out cancelled events - we don't want them in the calendar
+      const activeEvents = events.filter(e => !e.isCancelled);
+      setScheduleEvents(activeEvents);
 
       // Re-sync to calendar
-      const token = await firebaseUser.getIdToken();
-      GoogleCalendarService.setAccessToken(token);
-      const syncStats = await GoogleCalendarService.syncEvents(events);
-
-      console.log('Re-sync completed:', syncStats);
+      if (googleAccessToken) {
+        GoogleCalendarService.setAccessToken(googleAccessToken);
+        const syncStats = await GoogleCalendarService.syncEvents(activeEvents);
+        console.log('Re-sync completed:', syncStats);
+        console.log(`${syncStats.deleted} cancelled events removed from calendar`);
+      } else {
+        throw new Error('No access token available. Please log in again.');
+      }
 
     } catch (err: any) {
       console.error('Re-sync error:', err);

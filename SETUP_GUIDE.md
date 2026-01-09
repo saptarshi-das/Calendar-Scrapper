@@ -133,8 +133,8 @@ VITE_GOOGLE_CLIENT_ID=<your-oauth-client-id>.apps.googleusercontent.com
 VITE_GOOGLE_API_KEY=<your-google-api-key>
 
 # Google Sheets Configuration
-VITE_SCHEDULE_SHEET_ID=1jis4IowMXM72jJUlz3Yanv2YBu7ilcvU
-VITE_SCHEDULE_SHEET_GID=752189081
+VITE_SCHEDULE_SHEET_ID=1glNcxkwh4XspG3sz3UYAsFGnLP_54rlvNBkjtcl9SGM
+VITE_SCHEDULE_SHEET_GID=0
 
 # Domain Restriction
 VITE_ALLOWED_DOMAIN=@iimranchi.ac.in

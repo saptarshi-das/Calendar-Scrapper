@@ -13,8 +13,6 @@ dist-ssr
 *.local
 
 # Environment variables (sensitive data)
-.env
-.env.local
 
 # Editor directories and files
 .vscode/*

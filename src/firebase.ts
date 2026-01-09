@@ -23,6 +23,10 @@ googleProvider.setCustomParameters({
   hd: import.meta.env.VITE_ALLOWED_DOMAIN.replace('@', ''), // Remove @ for hosted domain
 });
 
+// Add scopes for Google Sheets and Calendar API access
+googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
+googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
+
 // Initialize Cloud Firestore and get a reference to the service
 export const db = getFirestore(app);
 

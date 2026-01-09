@@ -4,15 +4,10 @@ import type { Course, ScheduleEvent, TimeSlot } from '../types';
 const SHEET_ID = import.meta.env.VITE_SCHEDULE_SHEET_ID;
 const GID = import.meta.env.VITE_SCHEDULE_SHEET_GID;
 
-// Google Sheets API endpoint
-const getSheetURL = () => {
-    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
-    return `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A1:Z100?key=${apiKey}`;
-};
-
-// Alternative: Use public CSV export (doesn't require API key)
+// Alternative: Use public CSV export via Google Visualization API (works better with public sheets)
 const getPublicCSVURL = () => {
-    return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
+    // Using gviz/tq endpoint which is more reliable for public sheets
+    return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${GID}`;
 };
 
 export class SheetScraperService {
@@ -46,12 +41,41 @@ export class SheetScraperService {
 
     /**
      * Parse CSV data into 2D array
+     * Properly handles quoted fields and escaped quotes
      */
     static parseCSV(csvText: string): string[][] {
         const lines = csvText.split('\n');
         return lines.map(line => {
-            // Simple CSV parsing (doesn't handle quoted commas)
-            return line.split(',').map(cell => cell.trim());
+            const cells: string[] = [];
+            let currentCell = '';
+            let inQuotes = false;
+
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                const nextChar = line[i + 1];
+
+                if (char === '"') {
+                    if (inQuotes && nextChar === '"') {
+                        // Escaped quote
+                        currentCell += '"';
+                        i++; // Skip next quote
+                    } else {
+                        // Toggle quote state
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === ',' && !inQuotes) {
+                    // End of cell
+                    cells.push(currentCell.trim());
+                    currentCell = '';
+                } else {
+                    currentCell += char;
+                }
+            }
+
+            // Add last cell
+            cells.push(currentCell.trim());
+
+            return cells;
         });
     }
 
@@ -72,14 +96,16 @@ export class SheetScraperService {
                 if (cell && typeof cell === 'string') {
                     // Extract course codes (format: "Fintech-B (PT-1-2)")
                     // Pattern: CourseName-Section (Location)
+                    // Note: We only differentiate by course name and section, NOT by location
                     const matches = cell.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/g);
 
                     if (matches) {
                         matches.forEach(match => {
                             const courseMatch = match.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
                             if (courseMatch) {
-                                const [_, courseName, section, location] = courseMatch;
-                                const code = `${courseName}-${section} (${location})`;
+                                const [_, courseName, section] = courseMatch;
+                                // Use only courseName-section as the unique identifier
+                                const code = `${courseName}-${section}`;
 
                                 if (!coursesSet.has(code)) {
                                     coursesSet.add(code);
@@ -88,7 +114,7 @@ export class SheetScraperService {
                                         code: code,
                                         name: courseName,
                                         section: section,
-                                        location: location,
+                                        location: '', // Location varies per event, not per course
                                     });
                                 }
                             }
@@ -107,10 +133,22 @@ export class SheetScraperService {
     static parseScheduleEvents(rawData: any[][], selectedCourses: string[]): ScheduleEvent[] {
         const events: ScheduleEvent[] = [];
 
-        if (!rawData || rawData.length < 3) return events;
+        console.log('=== PARSING SCHEDULE EVENTS ===');
+        console.log('Raw data rows:', rawData.length);
+        console.log('Selected courses:', selectedCourses);
+
+        if (!rawData || rawData.length < 3) {
+            console.warn('Not enough data rows');
+            return events;
+        }
 
         // Parse header to get time slots
         const timeSlots = this.parseTimeSlots(rawData);
+        console.log('Parsed time slots:', timeSlots);
+
+        if (timeSlots.length === 0) {
+            console.error('No time slots found!');
+        }
 
         let currentWeek = 1;
         let currentDate = new Date();
@@ -124,6 +162,7 @@ export class SheetScraperService {
                 const weekMatch = row[0].match(/Week\s+(\d+)/);
                 if (weekMatch) {
                     currentWeek = parseInt(weekMatch[1]);
+                    console.log(`Found week ${currentWeek} at row ${i}`);
                 }
             }
 
@@ -131,61 +170,130 @@ export class SheetScraperService {
             const dateStr = row[0];
             if (dateStr && this.isValidDate(dateStr)) {
                 currentDate = this.parseDate(dateStr);
+                console.log(`Found date ${dateStr} -> ${currentDate.toDateString()} at row ${i}`);
             }
 
             // Column B: Day
             const day = row[1];
 
             if (day && this.isValidDay(day)) {
-                // Iterate through time slot columns
-                for (let j = 2; j < Math.min(row.length, timeSlots.length + 2); j++) {
-                    const cell = row[j];
+                console.log(`Processing day ${day} at row ${i}, date: ${currentDate.toDateString()}`);
+
+                // Each day has 4 rows:
+                // Row i:   First set of courses
+                // Row i+1: Professors for first set
+                // Row i+2: Second set of courses  
+                // Row i+3: Professors for second set
+
+                // Process first pair of course/professor rows (rows i and i+1)
+                const firstCourseRow = row;
+                const firstProfRow = i + 1 < rawData.length ? rawData[i + 1] : [];
+
+                for (let j = 2; j < Math.min(firstCourseRow.length, timeSlots.length + 2); j++) {
+                    const cell = firstCourseRow[j];
+                    const professorCell = firstProfRow[j] || '';
                     const timeSlot = timeSlots[j - 2];
 
                     if (cell && timeSlot) {
-                        // Parse events from this cell
+                        console.log(`  Row ${i} Col ${j}:`, cell.substring(0, 50));
                         const cellEvents = this.parseCellEvents(
                             cell,
                             currentWeek,
                             day,
                             currentDate,
                             timeSlot,
-                            selectedCourses
+                            selectedCourses,
+                            professorCell
                         );
+                        if (cellEvents.length > 0) {
+                            console.log(`    Found ${cellEvents.length} events (first set)`);
+                        }
+                        events.push(...cellEvents);
+                    }
+                }
+
+                // Process second pair of course/professor rows (rows i+2 and i+3)
+                const secondCourseRow = i + 2 < rawData.length ? rawData[i + 2] : [];
+                const secondProfRow = i + 3 < rawData.length ? rawData[i + 3] : [];
+
+                for (let j = 2; j < Math.min(secondCourseRow.length, timeSlots.length + 2); j++) {
+                    const cell = secondCourseRow[j];
+                    const professorCell = secondProfRow[j] || '';
+                    const timeSlot = timeSlots[j - 2];
+
+                    if (cell && timeSlot) {
+                        console.log(`  Row ${i + 2} Col ${j}:`, cell.substring(0, 50));
+                        const cellEvents = this.parseCellEvents(
+                            cell,
+                            currentWeek,
+                            day,
+                            currentDate,
+                            timeSlot,
+                            selectedCourses,
+                            professorCell
+                        );
+                        if (cellEvents.length > 0) {
+                            console.log(`    Found ${cellEvents.length} events (second set)`);
+                        }
                         events.push(...cellEvents);
                     }
                 }
             }
         }
 
+        console.log(`Total events extracted: ${events.length}`);
+        console.log('=== END PARSING ===');
         return events;
     }
 
     /**
      * Parse time slots from header row
+     * Searches for a row with clean time slot format since headers appear multiple times in the sheet
      */
     static parseTimeSlots(rawData: any[][]): TimeSlot[] {
         const timeSlots: TimeSlot[] = [];
 
-        // Assume row 1 contains time slot headers
-        if (rawData.length > 1) {
-            const headerRow = rawData[1];
+        console.log('Parsing time slots...');
 
-            for (let i = 2; i < headerRow.length; i++) {
-                const header = headerRow[i];
+        // Search through the first few rows to find a header row with time information
+        for (let rowIndex = 0; rowIndex < Math.min(rawData.length, 40); rowIndex++) {
+            const row = rawData[rowIndex];
+            const tempSlots: TimeSlot[] = [];
+
+            // Check if this row has time slot headers (starts from column 2)
+            for (let i = 2; i < row.length; i++) {
+                const header = row[i];
                 if (header && typeof header === 'string') {
-                    // Format: "9.00AM - 10.30AM"
-                    const timeMatch = header.match(/(\d+\.\d+[AP]M)\s*-\s*(\d+\.\d+[AP]M)/);
-                    if (timeMatch) {
-                        timeSlots.push({
-                            start: timeMatch[1].replace('.', ':'),
-                            end: timeMatch[2].replace('.', ':'),
+                    // Format: "9.00AM - 10.30AM" or "9:00AM - 10:30AM"
+                    // Some headers may have extra text like "Term 6 Schedule - Dec 29 - Jan 4 10.45AM - 12.15PM"
+                    // Extract the LAST occurrence of time pattern in the string
+                    const timePattern = /(\d+[:.]\d+[AP]M)\s*-\s*(\d+[:.]\d+[AP]M)/g;
+                    let match;
+                    let lastMatch = null;
+
+                    // Find all matches and keep the last one (in case of multiple times in one cell)
+                    while ((match = timePattern.exec(header)) !== null) {
+                        lastMatch = match;
+                    }
+
+                    if (lastMatch) {
+                        tempSlots.push({
+                            start: lastMatch[1].replace('.', ':'),
+                            end: lastMatch[2].replace('.', ':'),
                         });
+                        console.log(`  Column ${i}: "${header}" -> ${lastMatch[1]} - ${lastMatch[2]}`);
                     }
                 }
             }
+
+            // If we found a good set of time slots (at least 5), use this row
+            if (tempSlots.length >= 5) {
+                console.log(`Found ${tempSlots.length} time slots in row ${rowIndex}`);
+                return tempSlots;
+            }
         }
 
+        console.warn('No valid time slot header row found!');
         return timeSlots;
     }
 
@@ -198,7 +306,8 @@ export class SheetScraperService {
         day: string,
         date: Date,
         timeSlot: TimeSlot,
-        selectedCourses: string[]
+        selectedCourses: string[],
+        professorCell: string = '' // Professor name from the next row
     ): ScheduleEvent[] {
         const events: ScheduleEvent[] = [];
 
@@ -207,8 +316,10 @@ export class SheetScraperService {
 
         // Split by line breaks to handle multiple entries
         const lines = cellValue.split('\n').filter(line => line.trim());
+        const professorLines = professorCell.split('\n').filter(line => line.trim());
 
-        for (const line of lines) {
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex];
             // Check for strikethrough (would need HTML parsing)
             const hasStrikethrough = false; // Will be implemented with proper Sheets API
 
@@ -216,20 +327,22 @@ export class SheetScraperService {
             const courseMatch = line.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
             if (courseMatch) {
                 const [_, courseName, section, location] = courseMatch;
-                const courseCode = `${courseName}-${section} (${location})`;
+                // Course code is just name-section (without location)
+                const courseCode = `${courseName}-${section}`;
 
                 // Only include if user selected this course
                 if (selectedCourses.includes(courseCode)) {
-                    // Extract professor name (text after course code)
-                    const professor = line.replace(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\([^)]+\)/, '').trim();
+                    // Get professor from corresponding line in professorCell
+                    // If there are multiple courses in a cell, match by line index
+                    const professor = professorLines[lineIndex] || professorLines[0] || '';
 
                     const event: ScheduleEvent = {
-                        id: `${courseCode}-${date.toISOString()}-${timeSlot.start}`,
+                        id: `${courseCode}-${location}-${date.toISOString()}-${timeSlot.start}`,
                         courseCode,
                         courseName,
                         section,
-                        location,
-                        professor,
+                        location, // Store the specific location for this event
+                        professor: professor.trim(),
                         date,
                         timeSlot,
                         week,
