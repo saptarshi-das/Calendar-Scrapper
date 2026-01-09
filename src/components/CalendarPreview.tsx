@@ -150,7 +150,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                     </div>
                 ) : (
                     <div className="day-view">
-                        {sortedDates.slice(0, 7).map(dateKey => (
+                        {sortedDates.slice(0, 30).map(dateKey => (
                             <div key={dateKey} className="day-section">
                                 <h3 className="day-header">{formatDate(new Date(dateKey))}</h3>
                                 <div className="day-events">
@@ -176,9 +176,9 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                             </div>
                         ))}
 
-                        {sortedDates.length > 7 && (
+                        {sortedDates.length > 30 && (
                             <div className="more-days">
-                                <p>+ {sortedDates.length - 7} more days</p>
+                                <p>+ {sortedDates.length - 30} more days</p>
                             </div>
                         )}
                     </div>
