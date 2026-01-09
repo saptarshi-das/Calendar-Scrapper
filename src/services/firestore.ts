@@ -120,21 +120,25 @@ export class FirestoreService {
     static async saveUserCourseSelection(
         userId: string,
         email: string,
-        selectedCourses: string[]
+        selectedCourses: string[],
+        calendarId?: string
     ): Promise<void> {
         try {
             const userRef = doc(db, 'users', userId);
-            await setDoc(
-                userRef,
-                {
-                    email,
-                    selectedCourses,
-                    lastSyncedAt: serverTimestamp(),
-                    syncEnabled: true,
-                    updatedAt: serverTimestamp(),
-                },
-                { merge: true }
-            );
+            const userData: any = {
+                email,
+                selectedCourses,
+                lastSyncedAt: serverTimestamp(),
+                syncEnabled: true,
+                updatedAt: serverTimestamp(),
+            };
+
+            // Store calendarId if provided
+            if (calendarId) {
+                userData.calendarId = calendarId;
+            }
+
+            await setDoc(userRef, userData, { merge: true });
 
             console.log('User course selection saved');
         } catch (error) {

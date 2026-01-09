@@ -45,6 +45,71 @@ export class GoogleCalendarService {
     }
 
     /**
+     * Calendar name for MBA classes
+     */
+    static readonly CALENDAR_NAME = 'MBA term 6 classes';
+
+    /**
+     * Create a new calendar
+     */
+    static async createCalendar(name: string): Promise<string> {
+        try {
+            const response = await window.gapi.client.calendar.calendars.insert({
+                resource: {
+                    summary: name,
+                    description: 'Auto-synced course schedule from IIM Ranchi Schedule Sync',
+                    timeZone: 'Asia/Kolkata',
+                },
+            });
+
+            console.log('✅ Created new calendar:', name, response.result.id);
+            return response.result.id;
+        } catch (error) {
+            console.error('Error creating calendar:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Find an existing calendar by name
+     */
+    static async findCalendarByName(name: string): Promise<string | null> {
+        try {
+            const response = await window.gapi.client.calendar.calendarList.list();
+            const calendars = response.result.items || [];
+
+            const existingCalendar = calendars.find(
+                (cal: any) => cal.summary === name
+            );
+
+            if (existingCalendar) {
+                console.log('✅ Found existing calendar:', name, existingCalendar.id);
+                return existingCalendar.id;
+            }
+
+            return null;
+        } catch (error) {
+            console.error('Error finding calendar:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get or create the MBA classes calendar
+     */
+    static async getOrCreateClassesCalendar(): Promise<string> {
+        // First, try to find existing calendar
+        const existingId = await this.findCalendarByName(this.CALENDAR_NAME);
+
+        if (existingId) {
+            return existingId;
+        }
+
+        // Create new calendar
+        return await this.createCalendar(this.CALENDAR_NAME);
+    }
+
+    /**
    * Create a calendar event
    */
     static async createEvent(

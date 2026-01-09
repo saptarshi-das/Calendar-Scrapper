@@ -231,19 +231,24 @@ function App() {
       await GoogleCalendarService.initializeGAPI();
       GoogleCalendarService.setAccessToken(googleAccessToken);
 
+      // Get or create the dedicated classes calendar
+      const calendarId = await GoogleCalendarService.getOrCreateClassesCalendar();
+      console.log('Using calendar:', calendarId);
+
       // Filter out cancelled events - we don't want them in the calendar
       const activeEvents = previewEvents.filter(e => !e.isCancelled);
       console.log(`Syncing ${activeEvents.length} active events (${previewEvents.length - activeEvents.length} cancelled events excluded)`);
 
-      // Sync to Google Calendar
-      const syncStats = await GoogleCalendarService.syncEvents(activeEvents);
+      // Sync to Google Calendar (using dedicated calendar)
+      const syncStats = await GoogleCalendarService.syncEvents(activeEvents, calendarId);
       console.log('Initial sync completed:', syncStats);
 
-      // Save user preferences to Firestore
+      // Save user preferences to Firestore (including calendar ID)
       await FirestoreService.saveUserCourseSelection(
         user.uid,
         user.email,
-        selectedCourses
+        selectedCourses,
+        calendarId
       );
 
       // Mark as synced with calendar event IDs
@@ -302,8 +307,13 @@ function App() {
 
       // Re-sync to calendar
       if (googleAccessToken) {
+        await GoogleCalendarService.initializeGAPI();
         GoogleCalendarService.setAccessToken(googleAccessToken);
-        const syncStats = await GoogleCalendarService.syncEvents(activeEvents);
+
+        // Get or create the dedicated classes calendar
+        const calendarId = await GoogleCalendarService.getOrCreateClassesCalendar();
+
+        const syncStats = await GoogleCalendarService.syncEvents(activeEvents, calendarId);
         console.log('Re-sync completed:', syncStats);
         console.log(`${syncStats.deleted} cancelled events removed from calendar`);
       } else {

@@ -335,6 +335,10 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
+        // Use user's dedicated calendar or fall back to 'primary'
+        const calendarId = user.calendarId || "primary";
+        console.log(`   Using calendar: ${calendarId}`);
+
         // Get existing events created by this app
         const now = new Date();
         const threeMonthsFromNow = new Date();
@@ -342,7 +346,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
 
         const existingEventsRes = await calendar.events.list({
             auth,
-            calendarId: "primary",
+            calendarId: calendarId,
             timeMin: now.toISOString(),
             timeMax: threeMonthsFromNow.toISOString(),
             privateExtendedProperty: [`appCreated=true`],
@@ -370,7 +374,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 try {
                     await calendar.events.insert({
                         auth,
-                        calendarId: "primary",
+                        calendarId: calendarId,
                         resource: {
                             summary: `${event.courseName}-${event.section}`,
                             location: event.location,
@@ -407,7 +411,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 try {
                     await calendar.events.delete({
                         auth,
-                        calendarId: "primary",
+                        calendarId: calendarId,
                         eventId: existingEvent.id,
                     });
                     deleted++;
