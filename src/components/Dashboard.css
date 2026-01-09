@@ -255,8 +255,8 @@
 }
 
 .course-badge:hover {
-    background: rgba(102, 126, 234, 0.1);
-    border-color: rgba(102, 126, 234, 0.3);
+    background: rgba(229, 9, 20, 0.1);
+    border-color: rgba(229, 9, 20, 0.3);
 }
 
 @media (max-width: 768px) {

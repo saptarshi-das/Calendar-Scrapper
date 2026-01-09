@@ -202,7 +202,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                                 ? 'rgba(244, 67, 54, 0.1)'
                                 : 'rgba(33, 150, 243, 0.1)',
                         border: `1px solid ${message.type === 'success' ? '#4caf50' :
-                                message.type === 'error' ? '#f44336' : '#2196f3'
+                            message.type === 'error' ? '#f44336' : '#2196f3'
                             }`,
                         color: message.type === 'success' ? '#4caf50' :
                             message.type === 'error' ? '#f44336' : '#2196f3',
@@ -236,7 +236,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                         disabled={loading || !sheetUrl}
                         style={{
                             padding: '12px 24px',
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            background: 'var(--primary-gradient)',
                             border: 'none',
                             borderRadius: '8px',
                             color: '#fff',

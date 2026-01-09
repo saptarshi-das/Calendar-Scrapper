@@ -110,7 +110,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                                         style={{
                                             background: event.isCancelled
                                                 ? 'var(--cancelled-color)'
-                                                : '#667eea',
+                                                : 'var(--accent-color)',
                                         }}
                                     ></div>
                                 </div>
