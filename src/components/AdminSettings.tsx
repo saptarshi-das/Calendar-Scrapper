@@ -91,15 +91,15 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
             zIndex: 1000,
         }}>
             <div style={{
-                background: 'linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)',
+                background: 'var(--bg-secondary)',
                 padding: '2rem',
                 borderRadius: '16px',
                 maxWidth: '600px',
                 width: '90%',
-                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+                boxShadow: 'var(--shadow-xl)',
             }}>
                 <h2 style={{
-                    color: '#fff',
+                    color: 'var(--text-primary)',
                     marginBottom: '1.5rem',
                     fontSize: '1.5rem',
                 }}>
@@ -109,7 +109,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                 {/* Sheet URL Section */}
                 <div style={{ marginBottom: '1.5rem' }}>
                     <label style={{
-                        color: '#b4b4c9',
+                        color: 'var(--text-secondary)',
                         display: 'block',
                         marginBottom: '0.5rem',
                         fontSize: '0.9rem',
@@ -124,15 +124,15 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                         style={{
                             width: '100%',
                             padding: '12px',
-                            background: 'rgba(255, 255, 255, 0.05)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            background: 'var(--bg-tertiary)',
+                            border: '1px solid var(--glass-border)',
                             borderRadius: '8px',
-                            color: '#fff',
+                            color: 'var(--text-primary)',
                             fontSize: '0.9rem',
                         }}
                     />
                     <p style={{
-                        color: '#8888a0',
+                        color: 'var(--text-muted)',
                         fontSize: '0.75rem',
                         marginTop: '0.5rem',
                     }}>
@@ -143,10 +143,10 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                 {/* Sync Now Section */}
                 <div style={{
                     padding: '1rem',
-                    background: 'rgba(102, 126, 234, 0.1)',
+                    background: 'rgba(229, 9, 20, 0.05)',
                     borderRadius: '8px',
                     marginBottom: '1.5rem',
-                    border: '1px solid rgba(102, 126, 234, 0.2)',
+                    border: '1px solid rgba(229, 9, 20, 0.1)',
                 }}>
                     <div style={{
                         display: 'flex',
@@ -155,14 +155,14 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                     }}>
                         <div>
                             <h3 style={{
-                                color: '#fff',
+                                color: 'var(--text-primary)',
                                 fontSize: '1rem',
                                 marginBottom: '0.25rem',
                             }}>
                                 🚀 Manual Sync
                             </h3>
                             <p style={{
-                                color: '#8888a0',
+                                color: 'var(--text-muted)',
                                 fontSize: '0.75rem',
                             }}>
                                 Immediately sync all users' calendars with the latest schedule
@@ -174,11 +174,11 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                             style={{
                                 padding: '10px 20px',
                                 background: syncing
-                                    ? 'rgba(255, 255, 255, 0.1)'
-                                    : 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)',
+                                    ? 'var(--bg-tertiary)'
+                                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                                 border: 'none',
                                 borderRadius: '8px',
-                                color: '#fff',
+                                color: syncing ? 'var(--text-muted)' : '#fff',
                                 cursor: syncing ? 'not-allowed' : 'pointer',
                                 fontSize: '0.9rem',
                                 fontWeight: 'bold',
@@ -221,10 +221,10 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                         onClick={onClose}
                         style={{
                             padding: '12px 24px',
-                            background: 'rgba(255, 255, 255, 0.05)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            background: 'var(--bg-tertiary)',
+                            border: '1px solid var(--glass-border)',
                             borderRadius: '8px',
-                            color: '#fff',
+                            color: 'var(--text-primary)',
                             cursor: 'pointer',
                             fontSize: '0.9rem',
                         }}

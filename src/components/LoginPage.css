@@ -129,7 +129,7 @@
 }
 
 .feature-item:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--bg-tertiary);
     transform: translateX(5px);
 }
 
