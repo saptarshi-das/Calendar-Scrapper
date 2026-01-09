@@ -25,7 +25,8 @@ googleProvider.setCustomParameters({
 
 // Add scopes for Google Sheets and Calendar API access
 googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
-googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
+// Full calendar access to create and manage calendars (not just events)
+googleProvider.addScope('https://www.googleapis.com/auth/calendar');
 
 // Initialize Cloud Firestore and get a reference to the service
 export const db = getFirestore(app);
