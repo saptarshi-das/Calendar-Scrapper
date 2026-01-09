@@ -98,7 +98,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
             <div className="preview-content glass-card">
                 {viewMode === 'list' ? (
                     <div className="events-list-preview">
-                        {events.slice(0, 10).map((event, index) => (
+                        {events.slice(0, 10).map((event) => (
                             <div
                                 key={event.id}
                                 className={`preview-event-card ${event.isCancelled ? 'cancelled' : ''

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FirestoreService } from '../services/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 interface AdminSettingsProps {
     onClose: () => void;
@@ -8,7 +9,8 @@ interface AdminSettingsProps {
 export function AdminSettings({ onClose }: AdminSettingsProps) {
     const [sheetUrl, setSheetUrl] = useState('');
     const [loading, setLoading] = useState(false);
-    const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [syncing, setSyncing] = useState(false);
+    const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
     useEffect(() => {
         loadCurrentUrl();
@@ -34,7 +36,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
 
             setMessage({
                 type: 'success',
-                text: '✅ Sheet URL updated successfully! Cloud Function will use this URL from now on.',
+                text: '✅ Sheet URL updated! Use "Sync Now" to immediately update all calendars.',
             });
         } catch (error: any) {
             setMessage({
@@ -43,6 +45,35 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
             });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSyncNow = async () => {
+        try {
+            setSyncing(true);
+            setMessage({
+                type: 'info',
+                text: '⏳ Syncing all calendars... This may take 1-2 minutes.',
+            });
+
+            const functions = getFunctions();
+            const manualSync = httpsCallable(functions, 'manualSync');
+            const result = await manualSync();
+
+            const data = result.data as any;
+
+            setMessage({
+                type: 'success',
+                text: `🎉 Sync complete! ${data.successCount} users synced, ${data.eventsTotal} events processed.`,
+            });
+        } catch (error: any) {
+            console.error('Sync error:', error);
+            setMessage({
+                type: 'error',
+                text: `❌ Sync failed: ${error.message}`,
+            });
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -75,6 +106,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                     ⚙️ Admin Settings
                 </h2>
 
+                {/* Sheet URL Section */}
                 <div style={{ marginBottom: '1.5rem' }}>
                     <label style={{
                         color: '#b4b4c9',
@@ -104,10 +136,61 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                         fontSize: '0.75rem',
                         marginTop: '0.5rem',
                     }}>
-                        Paste the Google Sheets URL here. The Cloud Function will automatically use this sheet for daily syncs.
+                        Paste the Google Sheets URL. After saving, click "Sync Now" to update all calendars immediately.
                     </p>
                 </div>
 
+                {/* Sync Now Section */}
+                <div style={{
+                    padding: '1rem',
+                    background: 'rgba(102, 126, 234, 0.1)',
+                    borderRadius: '8px',
+                    marginBottom: '1.5rem',
+                    border: '1px solid rgba(102, 126, 234, 0.2)',
+                }}>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                    }}>
+                        <div>
+                            <h3 style={{
+                                color: '#fff',
+                                fontSize: '1rem',
+                                marginBottom: '0.25rem',
+                            }}>
+                                🚀 Manual Sync
+                            </h3>
+                            <p style={{
+                                color: '#8888a0',
+                                fontSize: '0.75rem',
+                            }}>
+                                Immediately sync all users' calendars with the latest schedule
+                            </p>
+                        </div>
+                        <button
+                            onClick={handleSyncNow}
+                            disabled={syncing}
+                            style={{
+                                padding: '10px 20px',
+                                background: syncing
+                                    ? 'rgba(255, 255, 255, 0.1)'
+                                    : 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)',
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                cursor: syncing ? 'not-allowed' : 'pointer',
+                                fontSize: '0.9rem',
+                                fontWeight: 'bold',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {syncing ? '⏳ Syncing...' : '🔄 Sync Now'}
+                        </button>
+                    </div>
+                </div>
+
+                {/* Message */}
                 {message && (
                     <div style={{
                         padding: '12px',
@@ -115,14 +198,20 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                         marginBottom: '1rem',
                         background: message.type === 'success'
                             ? 'rgba(76, 175, 80, 0.1)'
-                            : 'rgba(244, 67, 54, 0.1)',
-                        border: `1px solid ${message.type === 'success' ? '#4caf50' : '#f44336'}`,
-                        color: message.type === 'success' ? '#4caf50' : '#f44336',
+                            : message.type === 'error'
+                                ? 'rgba(244, 67, 54, 0.1)'
+                                : 'rgba(33, 150, 243, 0.1)',
+                        border: `1px solid ${message.type === 'success' ? '#4caf50' :
+                                message.type === 'error' ? '#f44336' : '#2196f3'
+                            }`,
+                        color: message.type === 'success' ? '#4caf50' :
+                            message.type === 'error' ? '#f44336' : '#2196f3',
                     }}>
                         {message.text}
                     </div>
                 )}
 
+                {/* Buttons */}
                 <div style={{
                     display: 'flex',
                     gap: '1rem',
@@ -140,7 +229,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                             fontSize: '0.9rem',
                         }}
                     >
-                        Cancel
+                        Close
                     </button>
                     <button
                         onClick={handleSave}
@@ -156,7 +245,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                             fontSize: '0.9rem',
                         }}
                     >
-                        {loading ? 'Saving...' : 'Save Changes'}
+                        {loading ? 'Saving...' : 'Save URL'}
                     </button>
                 </div>
             </div>

@@ -598,3 +598,161 @@ exports.dailyCalendarSync = onSchedule({
         throw error;
     }
 });
+
+/**
+ * Manual sync function - callable by admin from frontend
+ * Same logic as daily sync but triggered on demand
+ */
+exports.manualSync = onCall({
+    memory: "512MiB",
+    timeoutSeconds: 540,
+}, async (request) => {
+    // Verify admin email
+    const adminEmail = "saptarshi.dasi21@iimranchi.ac.in";
+    if (!request.auth || request.auth.token.email !== adminEmail) {
+        throw new Error("Unauthorized: Only admin can trigger manual sync");
+    }
+
+    console.log("🚀 Starting MANUAL calendar sync (triggered by admin)");
+
+    try {
+        const db = admin.firestore();
+
+        // 1. Load sheet ID from configuration
+        console.log("📋 Loading sheet configuration...");
+        const configDoc = await db.collection("config").doc("settings").get();
+
+        if (!configDoc.exists) {
+            throw new Error("Configuration not found. Please set the sheet URL in settings.");
+        }
+
+        const config = configDoc.data();
+        const CURRENT_SHEET_ID = config.scheduleSheetId;
+
+        if (!CURRENT_SHEET_ID) {
+            throw new Error("Sheet ID not configured. Please set it in settings.");
+        }
+
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}`);
+
+        // 2. Get admin user's OAuth token
+        console.log("🔐 Loading admin credentials...");
+        const adminConfigDoc = await db.collection("config").doc("adminUser").get();
+
+        if (!adminConfigDoc.exists) {
+            throw new Error("Admin user not configured. Please log in first.");
+        }
+
+        const adminConfig = adminConfigDoc.data();
+        let accessToken = adminConfig.oauthTokens?.accessToken;
+        const refreshToken = adminConfig.oauthTokens?.refreshToken;
+        const expiresAt = adminConfig.oauthTokens?.expiresAt?.toDate();
+
+        // Refresh token if expired
+        if (!accessToken || (expiresAt && expiresAt < new Date())) {
+            console.log("🔄 Refreshing admin token...");
+            const oauth2Client = new google.auth.OAuth2(
+                process.env.VITE_GOOGLE_CLIENT_ID,
+                process.env.VITE_GOOGLE_CLIENT_SECRET,
+            );
+
+            oauth2Client.setCredentials({
+                refresh_token: refreshToken,
+            });
+
+            const { credentials } = await oauth2Client.refreshAccessToken();
+            accessToken = credentials.access_token;
+
+            await db.collection("config").doc("adminUser").update({
+                "oauthTokens.accessToken": accessToken,
+                "oauthTokens.expiresAt": new Date(credentials.expiry_date),
+            });
+        }
+
+        // 3. Fetch restricted sheet
+        console.log("📊 Fetching restricted sheet data...");
+
+        const sheets = google.sheets({ version: "v4" });
+        const auth = new google.auth.OAuth2();
+        auth.setCredentials({ access_token: accessToken });
+
+        const response = await sheets.spreadsheets.values.get({
+            auth,
+            spreadsheetId: CURRENT_SHEET_ID,
+            range: `${SHEET_NAME}!A1:Z200`,
+        });
+
+        const rawData = response.data.values || [];
+        console.log(`📊 Fetched ${rawData.length} rows from restricted sheet`);
+
+        // 4. Extract courses and events
+        const courses = extractCourses(rawData);
+        console.log(`📚 Found ${courses.length} unique courses`);
+
+        const allCourses = courses.map((c) => c.code);
+        const events = parseScheduleEvents(rawData, allCourses);
+        console.log(`📅 Parsed ${events.length} total events`);
+
+        // 5. Update Firestore
+        await db.collection("schedule").doc("courses").set({
+            courses,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        await db.collection("schedule").doc("events").set({
+            events: events.map((e) => ({
+                ...e,
+                date: e.date.toISOString(),
+            })),
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log("💾 Updated Firestore");
+
+        // 6. Sync all users' calendars
+        const usersSnapshot = await db.collection("users")
+            .where("isSynced", "==", true)
+            .get();
+        console.log(`👥 Found ${usersSnapshot.size} synced users`);
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const userDoc of usersSnapshot.docs) {
+            const userData = userDoc.data();
+            try {
+                let userAccessToken = userData.oauthTokens?.accessToken;
+                const userExpiresAt = userData.oauthTokens?.expiresAt?.toDate();
+
+                if (!userAccessToken || (userExpiresAt && userExpiresAt < new Date())) {
+                    console.log(`🔄 Refreshing token for ${userData.email}`);
+                    userAccessToken = await refreshOAuthToken(
+                        userDoc.id,
+                        userData.oauthTokens?.refreshToken,
+                    );
+                }
+
+                const stats = await syncUserCalendar(userData, events, userAccessToken);
+                console.log(`✅ ${userData.email}: +${stats.created} events, -${stats.deleted} events`);
+                successCount++;
+            } catch (error) {
+                console.error(`❌ Failed to sync ${userData.email}:`, error.message);
+                errorCount++;
+            }
+        }
+
+        console.log(`🎉 Manual sync complete: ${successCount} success, ${errorCount} errors`);
+
+        return {
+            success: true,
+            message: `Synced ${successCount} users successfully`,
+            usersProcessed: usersSnapshot.size,
+            successCount,
+            errorCount,
+            eventsTotal: events.length,
+            coursesTotal: courses.length,
+        };
+    } catch (error) {
+        console.error("💥 Manual sync failed:", error);
+        throw new Error(error.message || "Sync failed");
+    }
+});

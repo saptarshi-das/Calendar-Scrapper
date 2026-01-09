@@ -9,7 +9,6 @@ declare global {
 
 export class GoogleCalendarService {
     private static DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
-    private static SCOPES = 'https://www.googleapis.com/auth/calendar.events';
 
     /**
      * Initialize Google Calendar API

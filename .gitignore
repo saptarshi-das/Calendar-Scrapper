@@ -13,7 +13,9 @@ dist-ssr
 *.local
 
 # Environment variables (sensitive data)
-
+.env
+.env.local
+functions/.env
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
