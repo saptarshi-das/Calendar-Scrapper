@@ -127,3 +127,22 @@ The key changes made:
 ---
 
 **Current Status**: Server restarted with new configuration. Ready for testing after making sheet public.
+
+## 💰 Preventing Blaze Plan Charges
+
+To ensure you stay within the free limits of the Firebase Blaze plan, we have optimized the Cloud Functions:
+
+### 1. Daily Calendar Sync (`dailyCalendarSync`)
+- **Optimization**: Set `retryCount: 2`.
+- **Reason**: If the Google Sheet is down or there is a temporary error, Cloud Functions will retry a limited number of times (2) instead of indefinitely for days. This provides resilience for temporary glitches while preventing infinite loops.
+- **Optimization**: Batched Google Calendar API calls.
+- **Reason**: Processing users sequentially was too slow. We now process 5 requests in parallel, reducing execution time significantly (saving "GB-seconds").
+
+### 2. Manual Sync (`manualSync`)
+- **Optimization**: Uses the same batched logic as daily sync.
+
+### 3. Monitoring Advice
+- **Check Usage**: Occasionally check the Firebase Console -> Usage tab.
+- **Firestore Reads**: The app reads all users once per day. If you reach >25,000 users, you might approach the free tier limit (50k reads/day).
+- **Storage**: We are not heavily using Storage, so this should be fine.
+- **Logs**: We optimized logging, but keep an eye on "Log Ingestion" if you have massive traffic.

@@ -367,8 +367,13 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         let deleted = 0;
 
         // Add new events
-        for (const event of userEvents) {
-            if (!existingEventsMap.has(event.id)) {
+        // Add new events (in batches to avoid rate limits but improve speed)
+        const eventsToCreate = userEvents.filter(event => !existingEventsMap.has(event.id));
+        const BATCH_SIZE = 5;
+
+        for (let i = 0; i < eventsToCreate.length; i += BATCH_SIZE) {
+            const batch = eventsToCreate.slice(i, i + BATCH_SIZE);
+            await Promise.all(batch.map(async (event) => {
                 try {
                     await calendar.events.insert({
                         auth,
@@ -399,13 +404,19 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 } catch (err) {
                     console.error(`Failed to create event ${event.id}:`, err.message);
                 }
-            }
+            }));
         }
 
         // Delete events that no longer exist
-        for (const existingEvent of existingEvents) {
+        // Delete events that no longer exist (in batches)
+        const eventsToDelete = existingEvents.filter(existingEvent => {
             const scheduleId = existingEvent.extendedProperties?.private?.scheduleEventId;
-            if (scheduleId && !newEventsMap.has(scheduleId)) {
+            return scheduleId && !newEventsMap.has(scheduleId);
+        });
+
+        for (let i = 0; i < eventsToDelete.length; i += BATCH_SIZE) {
+            const batch = eventsToDelete.slice(i, i + BATCH_SIZE);
+            await Promise.all(batch.map(async (existingEvent) => {
                 try {
                     await calendar.events.delete({
                         auth,
@@ -416,7 +427,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 } catch (err) {
                     console.error(`Failed to delete event ${existingEvent.id}:`, err.message);
                 }
-            }
+            }));
         }
 
         return { created, deleted };
@@ -453,6 +464,7 @@ exports.dailyCalendarSync = onSchedule({
     timeZone: "Asia/Kolkata",
     memory: "512MiB",
     timeoutSeconds: 540,
+    retryCount: 2,
 }, async (event) => {
     console.log("🚀 Starting daily calendar sync");
 
