@@ -10,8 +10,10 @@ interface DashboardProps {
     onResync: () => void;
     onEditCourses: () => void;
     onOpenSettings?: () => void;
+    onToggleSync?: () => void;
     loading?: boolean;
     isAdmin?: boolean;
+    syncEnabled?: boolean;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
@@ -22,8 +24,10 @@ const Dashboard: React.FC<DashboardProps> = ({
     onResync,
     onEditCourses,
     onOpenSettings,
+    onToggleSync,
     loading,
     isAdmin,
+    syncEnabled = true,
 }) => {
     const activeEvents = scheduleEvents.filter(e => !e.isCancelled);
     const cancelledEvents = scheduleEvents.filter(e => e.isCancelled);
@@ -109,7 +113,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <div>
                             <h2>Calendar Sync</h2>
                             <p className="sync-subtitle">
-                                Your schedule is automatically synced daily at 11:00 PM IST
+                                {syncEnabled
+                                    ? 'Your schedule is automatically synced daily at 2:00 AM IST'
+                                    : '⚠️ Auto-sync is disabled. You will not receive calendar updates.'}
                             </p>
                         </div>
                         <button
@@ -148,9 +154,20 @@ const Dashboard: React.FC<DashboardProps> = ({
 
                     <div className="sync-status">
                         <div className="status-indicator">
-                            <div className="status-dot"></div>
-                            <span>Last synced: Just now</span>
+                            <div className={`status-dot ${syncEnabled ? '' : 'status-dot-inactive'}`}></div>
+                            <span>{syncEnabled ? 'Auto-sync enabled' : 'Auto-sync disabled'}</span>
                         </div>
+
+                        {onToggleSync && (
+                            <button
+                                className={`btn ${syncEnabled ? 'btn-secondary' : 'btn-primary'}`}
+                                onClick={onToggleSync}
+                                disabled={loading}
+                                style={{ marginLeft: 'auto', fontSize: '0.875rem' }}
+                            >
+                                {syncEnabled ? '🔕 Unsubscribe' : '🔔 Resubscribe'}
+                            </button>
+                        )}
                     </div>
                 </div>
 

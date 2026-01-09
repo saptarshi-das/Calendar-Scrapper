@@ -187,12 +187,68 @@ export class FirestoreService {
                 calendarEventIds,
                 lastSyncedAt: serverTimestamp(),
                 initialSyncComplete: true,
+                isSynced: true,
             });
 
             console.log('User marked as synced');
         } catch (error) {
             console.error('Error marking user as synced:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Unsubscribe user from automatic calendar sync
+     */
+    static async unsubscribeFromSync(userId: string): Promise<void> {
+        try {
+            const userRef = doc(db, 'users', userId);
+            await updateDoc(userRef, {
+                syncEnabled: false,
+                updatedAt: serverTimestamp(),
+            });
+
+            console.log('User unsubscribed from sync');
+        } catch (error) {
+            console.error('Error unsubscribing user:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Resubscribe user to automatic calendar sync
+     */
+    static async resubscribeToSync(userId: string): Promise<void> {
+        try {
+            const userRef = doc(db, 'users', userId);
+            await updateDoc(userRef, {
+                syncEnabled: true,
+                updatedAt: serverTimestamp(),
+            });
+
+            console.log('User resubscribed to sync');
+        } catch (error) {
+            console.error('Error resubscribing user:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Check if user is subscribed to sync
+     */
+    static async isUserSubscribed(userId: string): Promise<boolean> {
+        try {
+            const userRef = doc(db, 'users', userId);
+            const userDoc = await getDoc(userRef);
+
+            if (userDoc.exists()) {
+                return userDoc.data().syncEnabled !== false; // Default to true if not set
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error checking subscription status:', error);
+            return true;
         }
     }
 

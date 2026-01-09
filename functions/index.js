@@ -6,10 +6,8 @@ const { google } = require("googleapis");
 
 admin.initializeApp();
 
-// Configuration - ACTUAL RESTRICTED SHEET
-const SHEET_ID = "1jis4IowMXM72jJUlz3Yanv2YBu7ilcvU";
-const GID = "0";
-const SHEET_NAME = "Sheet1"; // Adjust if needed
+// Configuration - defaults (can be overridden by Firestore config)
+const DEFAULT_SHEET_NAME = "Schedule";
 
 /**
  * Parse CSV data into 2D array
@@ -471,12 +469,13 @@ exports.dailyCalendarSync = onSchedule({
 
         const config = configDoc.data();
         const CURRENT_SHEET_ID = config.scheduleSheetId;
+        const sheetTabName = config.sheetTabName || DEFAULT_SHEET_NAME;
 
         if (!CURRENT_SHEET_ID) {
             throw new Error("Sheet ID not configured. Please set it in the admin panel.");
         }
 
-        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}`);
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}`);
 
         // 2. Get admin user's OAuth token from Firestore
         console.log("🔐 Loading admin credentials...");
@@ -520,11 +519,30 @@ exports.dailyCalendarSync = onSchedule({
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        const response = await sheets.spreadsheets.values.get({
-            auth,
-            spreadsheetId: CURRENT_SHEET_ID,
-            range: `${SHEET_NAME}!A1:Z200`,
-        });
+        // Try to get data - use sheetTabName if available, otherwise just get first sheet
+        let response;
+        try {
+            response = await sheets.spreadsheets.values.get({
+                auth,
+                spreadsheetId: CURRENT_SHEET_ID,
+                range: `${sheetTabName}!A1:Z200`,
+            });
+        } catch (rangeError) {
+            console.log(`Sheet tab '${sheetTabName}' not found, trying to get spreadsheet info...`);
+            // Get spreadsheet info to find first sheet name
+            const spreadsheetInfo = await sheets.spreadsheets.get({
+                auth,
+                spreadsheetId: CURRENT_SHEET_ID,
+            });
+            const firstSheetName = spreadsheetInfo.data.sheets[0].properties.title;
+            console.log(`Using first sheet: ${firstSheetName}`);
+
+            response = await sheets.spreadsheets.values.get({
+                auth,
+                spreadsheetId: CURRENT_SHEET_ID,
+                range: `${firstSheetName}!A1:Z200`,
+            });
+        }
 
         const rawData = response.data.values || [];
         console.log(`📊 Fetched ${rawData.length} rows from restricted sheet`);
@@ -632,12 +650,13 @@ exports.manualSync = onCall({
 
         const config = configDoc.data();
         const CURRENT_SHEET_ID = config.scheduleSheetId;
+        const sheetTabName = config.sheetTabName || DEFAULT_SHEET_NAME;
 
         if (!CURRENT_SHEET_ID) {
             throw new Error("Sheet ID not configured. Please set it in settings.");
         }
 
-        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}`);
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}`);
 
         // 2. Get admin user's OAuth token
         console.log("🔐 Loading admin credentials...");
@@ -680,11 +699,30 @@ exports.manualSync = onCall({
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        const response = await sheets.spreadsheets.values.get({
-            auth,
-            spreadsheetId: CURRENT_SHEET_ID,
-            range: `${SHEET_NAME}!A1:Z200`,
-        });
+        // Try to get data - use sheetTabName if available, otherwise just get first sheet
+        let response;
+        try {
+            response = await sheets.spreadsheets.values.get({
+                auth,
+                spreadsheetId: CURRENT_SHEET_ID,
+                range: `${sheetTabName}!A1:Z200`,
+            });
+        } catch (rangeError) {
+            console.log(`Sheet tab '${sheetTabName}' not found, trying to get spreadsheet info...`);
+            // Get spreadsheet info to find first sheet name
+            const spreadsheetInfo = await sheets.spreadsheets.get({
+                auth,
+                spreadsheetId: CURRENT_SHEET_ID,
+            });
+            const firstSheetName = spreadsheetInfo.data.sheets[0].properties.title;
+            console.log(`Using first sheet: ${firstSheetName}`);
+
+            response = await sheets.spreadsheets.values.get({
+                auth,
+                spreadsheetId: CURRENT_SHEET_ID,
+                range: `${firstSheetName}!A1:Z200`,
+            });
+        }
 
         const rawData = response.data.values || [];
         console.log(`📊 Fetched ${rawData.length} rows from restricted sheet`);

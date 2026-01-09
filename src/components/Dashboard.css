@@ -126,6 +126,11 @@
     animation: pulse-dot 2s ease-in-out infinite;
 }
 
+.status-dot.status-dot-inactive {
+    background: var(--text-muted);
+    animation: none;
+}
+
 @keyframes pulse-dot {
 
     0%,

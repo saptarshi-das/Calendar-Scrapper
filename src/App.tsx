@@ -27,6 +27,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [syncEnabled, setSyncEnabled] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -55,6 +56,11 @@ function App() {
         if (userSelection && userSelection.selectedCourses.length > 0) {
           // User has already set up, go to dashboard
           setSelectedCourses(userSelection.selectedCourses);
+
+          // Check sync subscription status
+          const isSubscribed = await FirestoreService.isUserSubscribed(firebaseUser.uid);
+          setSyncEnabled(isSubscribed);
+
           await loadDashboardData(userSelection.selectedCourses);
         } else {
           // New user, load courses for selection
@@ -328,6 +334,32 @@ function App() {
     }
   };
 
+  const handleToggleSync = async () => {
+    if (!user) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      if (syncEnabled) {
+        // Unsubscribe
+        await FirestoreService.unsubscribeFromSync(user.uid);
+        setSyncEnabled(false);
+        console.log('User unsubscribed from auto-sync');
+      } else {
+        // Resubscribe
+        await FirestoreService.resubscribeToSync(user.uid);
+        setSyncEnabled(true);
+        console.log('User resubscribed to auto-sync');
+      }
+    } catch (err: any) {
+      console.error('Error toggling sync:', err);
+      setError(err.message || 'Failed to update sync preferences');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (appState === 'loading') {
     return (
       <div className="app-loading">
@@ -439,8 +471,10 @@ function App() {
           onResync={handleResync}
           onEditCourses={() => setAppState('select-courses')}
           onOpenSettings={() => setShowSettings(true)}
+          onToggleSync={handleToggleSync}
           loading={loading}
           isAdmin={isAdmin}
+          syncEnabled={syncEnabled}
         />
 
         {showSettings && isAdmin && (
