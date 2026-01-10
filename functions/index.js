@@ -291,8 +291,11 @@ function parseTimeSlots(rawData) {
  * Check if string is a valid day
  */
 function isValidDay(day) {
-    const validDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const validDays = [
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+        "Mon", "Tue", "Wed", "Thu", "Thurs", "Fri", "Sat", "Sun",
+        "Tues", "Weds"  // Additional common abbreviations
+    ];
     return validDays.some((d) => day && day.includes(d));
 }
 
@@ -488,11 +491,13 @@ function parseScheduleEvents(rawData, selectedCourses) {
         // Check for date
         if (cell0 && isValidDate(cell0)) {
             currentDate = parseDate(cell0);
+            console.log(`Found date ${cell0} -> ${currentDate.toDateString()} at row ${i}`);
         }
 
         // Check for day - use asString for safe string conversion
         const day = asString(row[1]);
         if (day && isValidDay(day)) {
+            console.log(`Processing day ${day} at row ${i}, date: ${currentDate.toDateString()}`);
             // Process all 4 rows for this day
             const firstCourseRow = row;
             const firstProfRow = i + 1 < rawData.length ? rawData[i + 1] : [];

@@ -409,7 +409,11 @@ export class SheetScraperService {
     }
 
     static isValidDay(day: string): boolean {
-        const validDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        return validDays.includes(day);
+        const validDays = [
+            'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+            'Mon', 'Tue', 'Wed', 'Thu', 'Thurs', 'Fri', 'Sat', 'Sun',
+            'Tues', 'Weds'
+        ];
+        return validDays.some(d => day && day.includes(d));
     }
 }
