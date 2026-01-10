@@ -30,8 +30,12 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
         return time;
     };
 
-    // Group events by date
-    const eventsByDate = events.reduce((acc, event) => {
+    // Filter out cancelled events - don't show them at all
+    const activeEvents = events.filter(e => !e.isCancelled);
+    const cancelledCount = events.filter(e => e.isCancelled).length;
+
+    // Group only active events by date
+    const eventsByDate = activeEvents.reduce((acc, event) => {
         const dateKey = event.date.toDateString();
         if (!acc[dateKey]) {
             acc[dateKey] = [];
@@ -43,9 +47,6 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
     const sortedDates = Object.keys(eventsByDate).sort(
         (a, b) => new Date(a).getTime() - new Date(b).getTime()
     );
-
-    const activeEvents = events.filter(e => !e.isCancelled);
-    const cancelledEvents = events.filter(e => e.isCancelled);
 
     return (
         <div className="calendar-preview">
@@ -61,21 +62,19 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
             {/* Stats */}
             <div className="preview-stats">
                 <div className="stat-item">
-                    <span className="stat-number">{events.length}</span>
-                    <span className="stat-label">Total Events</span>
-                </div>
-                <div className="stat-item">
                     <span className="stat-number">{activeEvents.length}</span>
-                    <span className="stat-label">Active Classes</span>
-                </div>
-                <div className="stat-item">
-                    <span className="stat-number">{cancelledEvents.length}</span>
-                    <span className="stat-label">Cancelled</span>
+                    <span className="stat-label">Classes to Add</span>
                 </div>
                 <div className="stat-item">
                     <span className="stat-number">{sortedDates.length}</span>
-                    <span className="stat-label">Total Days</span>
+                    <span className="stat-label">Days</span>
                 </div>
+                {cancelledCount > 0 && (
+                    <div className="stat-item stat-muted">
+                        <span className="stat-number">{cancelledCount}</span>
+                        <span className="stat-label">Cancelled (hidden)</span>
+                    </div>
+                )}
             </div>
 
             {/* View Mode Toggle */}
@@ -98,19 +97,16 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
             <div className="preview-content glass-card">
                 {viewMode === 'list' ? (
                     <div className="events-list-preview">
-                        {events.slice(0, 10).map((event) => (
+                        {activeEvents.slice(0, 10).map((event) => (
                             <div
                                 key={event.id}
-                                className={`preview-event-card ${event.isCancelled ? 'cancelled' : ''
-                                    }`}
+                                className="preview-event-card"
                             >
                                 <div className="event-indicator">
                                     <div
                                         className="event-color"
                                         style={{
-                                            background: event.isCancelled
-                                                ? 'var(--cancelled-color)'
-                                                : 'var(--accent-color)',
+                                            background: 'var(--accent-color)',
                                         }}
                                     ></div>
                                 </div>
@@ -118,9 +114,6 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                                 <div className="event-content">
                                     <div className="event-title-row">
                                         <h4>{event.courseName}-{event.section}</h4>
-                                        {event.isCancelled && (
-                                            <span className="badge badge-error">Cancelled</span>
-                                        )}
                                     </div>
 
                                     <div className="event-details-row">
@@ -142,9 +135,9 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                             </div>
                         ))}
 
-                        {events.length > 10 && (
+                        {activeEvents.length > 10 && (
                             <div className="more-events">
-                                <p>+ {events.length - 10} more events will be added</p>
+                                <p>+ {activeEvents.length - 10} more events will be added</p>
                             </div>
                         )}
                     </div>
@@ -157,8 +150,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                                     {eventsByDate[dateKey].map(event => (
                                         <div
                                             key={event.id}
-                                            className={`day-event ${event.isCancelled ? 'cancelled' : ''
-                                                }`}
+                                            className="day-event"
                                         >
                                             <div className="event-time-badge">
                                                 {formatTime(event.timeSlot.start)}
@@ -167,9 +159,6 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                                                 <strong>{event.courseName}-{event.section}</strong>
                                                 <span>📍 {event.location} • {event.professor}</span>
                                             </div>
-                                            {event.isCancelled && (
-                                                <span className="cancel-badge">✕</span>
-                                            )}
                                         </div>
                                     ))}
                                 </div>

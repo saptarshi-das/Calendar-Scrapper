@@ -3,11 +3,214 @@ const { onCall } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const { google } = require("googleapis");
+const XLSX = require("xlsx");
+const JSZip = require("jszip");
 
 admin.initializeApp();
 
 // Configuration - defaults (can be overridden by Firestore config)
 const DEFAULT_SHEET_NAME = "Schedule";
+
+/**
+ * Fetch sheet data - handles both native Google Sheets and .xlsx files
+ * For .xlsx files, uses Google Drive API to download and parse with SheetJS
+ */
+async function fetchSheetData(auth, spreadsheetId, sheetTabName) {
+    const sheets = google.sheets({ version: "v4" });
+    const drive = google.drive({ version: "v3", auth });
+
+    // First, try the Google Sheets API (works for native Google Sheets)
+    try {
+        const response = await sheets.spreadsheets.values.get({
+            auth,
+            spreadsheetId,
+            range: `${sheetTabName}!A1:Z200`,
+        });
+        console.log(`Successfully fetched data using Sheets API with tab '${sheetTabName}'`);
+        return response.data.values || [];
+    } catch (sheetsError) {
+        console.log(`Sheets API failed for tab '${sheetTabName}': ${sheetsError.message}`);
+
+        // Try without tab name
+        try {
+            const response = await sheets.spreadsheets.values.get({
+                auth,
+                spreadsheetId,
+                range: `A1:Z200`,
+            });
+            console.log("Successfully fetched data using Sheets API without tab name");
+            return response.data.values || [];
+        } catch (noTabError) {
+            // Check if this is an .xlsx file error
+            if (noTabError.message.includes("not supported for this document") ||
+                noTabError.message.includes("FAILED_PRECONDITION")) {
+                console.log("Detected .xlsx file - switching to Google Drive API download...");
+
+                // Use Google Drive API to download the .xlsx file
+                try {
+                    const fileResponse = await drive.files.get({
+                        fileId: spreadsheetId,
+                        alt: "media",
+                    }, {
+                        responseType: "arraybuffer",
+                    });
+
+                    console.log("Downloaded .xlsx file from Google Drive");
+
+                    // Use JSZip to parse the xlsx file and extract style information from raw XML
+                    const zip = await JSZip.loadAsync(fileResponse.data);
+
+                    // Parse styles.xml to get font info
+                    const stylesXml = await zip.file("xl/styles.xml")?.async("string");
+                    const cancelledFontIds = new Set();
+                    const cancelledStyleIds = new Set();
+
+                    if (stylesXml) {
+                        // Extract font definitions and find red/strikethrough fonts
+                        const fontMatches = stylesXml.matchAll(/<font[^>]*>([\s\S]*?)<\/font>/gi);
+                        let fontIndex = 0;
+                        for (const match of fontMatches) {
+                            const fontXml = match[1];
+                            const isStrike = /<strike/i.test(fontXml);
+                            const colorMatch = fontXml.match(/color[^>]*rgb=["']([A-Fa-f0-9]{6,8})["']/i);
+
+                            let isRed = false;
+                            if (colorMatch) {
+                                // Color can be ARGB (8 chars) or RGB (6 chars)
+                                // For ARGB like "FFFF0000", the last 6 chars are the RGB
+                                const fullColor = colorMatch[1].toUpperCase();
+                                const rgb = fullColor.length === 8 ? fullColor.slice(2) : fullColor;
+
+                                // Check for red shades: FF0000, F60000, C00000, etc.
+                                // Red has high R value (>C0), low G and B (<30)
+                                if (rgb.length === 6) {
+                                    const r = parseInt(rgb.slice(0, 2), 16);
+                                    const g = parseInt(rgb.slice(2, 4), 16);
+                                    const b = parseInt(rgb.slice(4, 6), 16);
+
+                                    // Red: R > 200, G < 50, B < 50
+                                    isRed = r > 200 && g < 50 && b < 50;
+                                }
+                            }
+
+                            // Only mark as cancelled if BOTH strikethrough AND red
+                            // (Based on the spreadsheet, cancelled courses have red text with strikethrough)
+                            if (isStrike && isRed) {
+                                cancelledFontIds.add(fontIndex);
+                                console.log(`Font ${fontIndex} is cancelled: strike=${isStrike}, color=${colorMatch?.[1]}`);
+                            }
+                            fontIndex++;
+                        }
+
+                        // Extract cellXfs to map font IDs to style IDs
+                        const cellXfsMatch = stylesXml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/i);
+                        if (cellXfsMatch) {
+                            const xfMatches = cellXfsMatch[1].matchAll(/<xf[^>]*>/gi);
+                            let xfIndex = 0;
+                            for (const xfMatch of xfMatches) {
+                                const fontIdMatch = xfMatch[0].match(/fontId=["'](\d+)["']/i);
+                                if (fontIdMatch) {
+                                    const fontId = parseInt(fontIdMatch[1]);
+                                    if (cancelledFontIds.has(fontId)) {
+                                        cancelledStyleIds.add(xfIndex);
+                                    }
+                                }
+                                xfIndex++;
+                            }
+                        }
+                    }
+
+                    console.log(`Cancelled fonts: ${cancelledFontIds.size}, Cancelled style IDs: ${cancelledStyleIds.size}`);
+
+                    // Parse sheet XML to get cell style indices
+                    const cellStyleIndices = {};
+                    const sheetFiles = Object.keys(zip.files).filter(f => f.match(/xl\/worksheets\/sheet\d*\.xml/i));
+                    const targetSheetFile = sheetFiles.find(f => f.includes("sheet1")) || sheetFiles[0];
+
+                    if (targetSheetFile) {
+                        const sheetXml = await zip.file(targetSheetFile)?.async("string");
+                        if (sheetXml) {
+                            // Parse each cell (c element) and extract style index (s attribute)
+                            const cellMatches = sheetXml.matchAll(/<c\s+r=["']([A-Z]+\d+)["'][^>]*>/gi);
+                            for (const match of cellMatches) {
+                                const cellRef = match[1]; // e.g., "A1", "H9"
+                                const styleMatch = match[0].match(/\s+s=["'](\d+)["']/i);
+                                if (styleMatch) {
+                                    const styleIndex = parseInt(styleMatch[1]);
+                                    // Convert cell ref to row,col
+                                    const decoded = XLSX.utils.decode_cell(cellRef);
+                                    cellStyleIndices[`${decoded.r},${decoded.c}`] = styleIndex;
+                                }
+                            }
+                        }
+                    }
+
+                    console.log(`Built style index map for ${Object.keys(cellStyleIndices).length} cells`);
+
+                    // Build cancelled cells map
+                    const cellStyles = {};
+                    for (const [key, styleIndex] of Object.entries(cellStyleIndices)) {
+                        if (cancelledStyleIds.has(styleIndex)) {
+                            cellStyles[key] = { isCancelled: true };
+                        }
+                    }
+
+                    console.log(`Found ${Object.keys(cellStyles).length} cells with cancelled styling`);
+
+                    // Now parse with SheetJS for actual data
+                    const workbook = XLSX.read(fileResponse.data, {
+                        type: "buffer",
+                        cellDates: false,
+                        raw: false,
+                        dateNF: "d/m/yyyy",
+                    });
+
+                    // Get the first sheet or the sheet with the specified name
+                    let sheetName = workbook.SheetNames[0];
+                    if (sheetTabName && workbook.SheetNames.includes(sheetTabName)) {
+                        sheetName = sheetTabName;
+                    }
+
+                    console.log(`Parsing sheet: ${sheetName} (available sheets: ${workbook.SheetNames.join(", ")})`);
+
+                    const worksheet = workbook.Sheets[sheetName];
+
+                    // Convert to 2D array (same format as Sheets API returns)
+                    // raw: false formats dates as strings, dateNF specifies the format
+                    const rawData = XLSX.utils.sheet_to_json(worksheet, {
+                        header: 1,  // Return as 2D array
+                        defval: "", // Default value for empty cells
+                        raw: false, // Format cells (dates become strings)
+                        dateNF: "d/m/yyyy", // Date format to match what the parser expects
+                    });
+
+                    console.log(`Successfully parsed .xlsx file: ${rawData.length} rows`);
+
+                    // Attach styles info to rawData for use in parsing
+                    rawData._xlsxCellStyles = cellStyles;
+
+                    return rawData;
+                } catch (driveError) {
+                    console.error("Failed to download/parse .xlsx file:", driveError.message);
+                    throw new Error(`Unable to access .xlsx file. Make sure you have view access. Error: ${driveError.message}`);
+                }
+            } else {
+                // Not an .xlsx file error, re-throw
+                throw noTabError;
+            }
+        }
+    }
+}
+/**
+ * Safely convert a cell value to string
+ * SheetJS may return numbers, dates, or other types
+ */
+function asString(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    return String(value);
+}
+
 
 /**
  * Parse CSV data into 2D array
@@ -55,8 +258,8 @@ function parseTimeSlots(rawData) {
         const tempSlots = [];
 
         for (let i = 2; i < row.length; i++) {
-            const header = row[i];
-            if (header && typeof header === "string") {
+            const header = asString(row[i]);
+            if (header) {
                 const timePattern = /(\d+[:.]\d+[AP]M)\s*-\s*(\d+[:.]\d+[AP]M)/g;
                 let match;
                 let lastMatch = null;
@@ -104,12 +307,14 @@ function isValidDate(dateStr) {
 
 /**
  * Parse date string to Date object
+ * Format is D/M/YYYY (day/month/year)
  */
 function parseDate(dateStr) {
     const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (match) {
-        const month = parseInt(match[1]) - 1;
-        const day = parseInt(match[2]);
+        // Format is D/M/YYYY - day is first, month is second
+        const day = parseInt(match[1]);
+        const month = parseInt(match[2]) - 1; // Month is 0-indexed in JS
         const year = parseInt(match[3]);
         return new Date(year, month, day);
     }
@@ -118,8 +323,9 @@ function parseDate(dateStr) {
 
 /**
  * Parse events from a cell
+ * @param {boolean} isCancelled - Whether this cell is marked as cancelled (red/strikethrough)
  */
-function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, professorCell = "") {
+function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, professorCell = "", isCancelled = false) {
     const events = [];
     const lines = cellValue.split("\n").filter((line) => line.trim());
     const professorLines = professorCell.split("\n").filter((line) => line.trim());
@@ -158,10 +364,10 @@ function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, 
                 timeSlot,
                 week,
                 day,
-                status: "active",
-                isCancelled: false,
-                isRed: false,
-                hasStrikethrough: false,
+                status: isCancelled ? "cancelled" : "active",
+                isCancelled: isCancelled,
+                isRed: isCancelled,
+                hasStrikethrough: isCancelled,
             };
 
             events.push(event);
@@ -181,8 +387,8 @@ function extractCourses(rawData) {
     for (let i = 2; i < rawData.length; i++) {
         const row = rawData[i];
         for (let j = 2; j < row.length; j++) {
-            const cell = row[j];
-            if (cell && typeof cell === "string") {
+            const cell = asString(row[j]);
+            if (cell) {
                 // Match multi-section courses: CourseName-A (Location)
                 const multiSectionMatches = cell.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/g);
                 if (multiSectionMatches) {
@@ -251,28 +457,41 @@ function parseScheduleEvents(rawData, selectedCourses) {
         return events;
     }
 
+    // Get cell styles from .xlsx parsing (if available)
+    const cellStyles = rawData._xlsxCellStyles || {};
+    const hasCellStyles = Object.keys(cellStyles).length > 0;
+    if (hasCellStyles) {
+        console.log("Using cell styles to detect cancelled courses");
+    }
+
+    // Helper function to check if a cell is cancelled
+    const isCellCancelled = (rowIndex, colIndex) => {
+        const key = `${rowIndex},${colIndex}`;
+        return cellStyles[key]?.isCancelled || false;
+    };
+
     let currentWeek = 1;
     let currentDate = new Date();
 
     for (let i = 0; i < rawData.length; i++) {
         const row = rawData[i];
 
-        // Check for week info
-        if (row[0] && row[0].includes("Week")) {
-            const weekMatch = row[0].match(/Week\s+(\d+)/);
+        // Check for week info - use asString for safe string conversion
+        const cell0 = asString(row[0]);
+        if (cell0 && cell0.includes("Week")) {
+            const weekMatch = cell0.match(/Week\s+(\d+)/);
             if (weekMatch) {
                 currentWeek = parseInt(weekMatch[1]);
             }
         }
 
         // Check for date
-        const dateStr = row[0];
-        if (dateStr && isValidDate(dateStr)) {
-            currentDate = parseDate(dateStr);
+        if (cell0 && isValidDate(cell0)) {
+            currentDate = parseDate(cell0);
         }
 
-        // Check for day
-        const day = row[1];
+        // Check for day - use asString for safe string conversion
+        const day = asString(row[1]);
         if (day && isValidDay(day)) {
             // Process all 4 rows for this day
             const firstCourseRow = row;
@@ -282,9 +501,12 @@ function parseScheduleEvents(rawData, selectedCourses) {
 
             // First set of courses
             for (let j = 2; j < Math.min(firstCourseRow.length, timeSlots.length + 2); j++) {
-                const cell = firstCourseRow[j];
-                const professorCell = firstProfRow[j] || "";
+                const cell = asString(firstCourseRow[j]);
+                const professorCell = asString(firstProfRow[j]);
                 const timeSlot = timeSlots[j - 2];
+
+                // Check if this cell is cancelled (red/strikethrough)
+                const isCancelled = isCellCancelled(i, j);
 
                 if (cell && timeSlot) {
                     const cellEvents = parseCellEvents(
@@ -295,16 +517,20 @@ function parseScheduleEvents(rawData, selectedCourses) {
                         timeSlot,
                         selectedCourses,
                         professorCell,
+                        isCancelled,
                     );
                     events.push(...cellEvents);
                 }
             }
 
-            // Second set of courses
+            // Second set of courses (row i+2)
             for (let j = 2; j < Math.min(secondCourseRow.length, timeSlots.length + 2); j++) {
-                const cell = secondCourseRow[j];
-                const professorCell = secondProfRow[j] || "";
+                const cell = asString(secondCourseRow[j]);
+                const professorCell = asString(secondProfRow[j]);
                 const timeSlot = timeSlots[j - 2];
+
+                // Check if this cell is cancelled (red/strikethrough)
+                const isCancelled = isCellCancelled(i + 2, j);
 
                 if (cell && timeSlot) {
                     const cellEvents = parseCellEvents(
@@ -315,11 +541,18 @@ function parseScheduleEvents(rawData, selectedCourses) {
                         timeSlot,
                         selectedCourses,
                         professorCell,
+                        isCancelled,
                     );
                     events.push(...cellEvents);
                 }
             }
         }
+    }
+
+    // Log cancelled events count
+    const cancelledEvents = events.filter(e => e.isCancelled);
+    if (cancelledEvents.length > 0) {
+        console.log(`Found ${cancelledEvents.length} cancelled events out of ${events.length} total`);
     }
 
     return events;
@@ -573,53 +806,12 @@ exports.dailyCalendarSync = onSchedule({
         // 3. Fetch restricted sheet using admin's OAuth token and dynamic sheet ID
         console.log("📊 Fetching restricted sheet data...");
 
-        const sheets = google.sheets({ version: "v4" });
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        // Try to get data - use sheetTabName if available
-        // For .xlsx files, spreadsheets.get() doesn't work, so we use fallbacks
-        let response;
-        try {
-            response = await sheets.spreadsheets.values.get({
-                auth,
-                spreadsheetId: CURRENT_SHEET_ID,
-                range: `${sheetTabName}!A1:Z200`,
-            });
-        } catch (rangeError) {
-            console.log(`Sheet tab '${sheetTabName}' not found, trying without tab name...`);
-
-            // Fallback 1: Try without sheet name (gets first sheet by default)
-            // This works for both native sheets and .xlsx files
-            try {
-                response = await sheets.spreadsheets.values.get({
-                    auth,
-                    spreadsheetId: CURRENT_SHEET_ID,
-                    range: `A1:Z200`,
-                });
-                console.log("Successfully fetched data using default sheet");
-            } catch (defaultError) {
-                console.error("Failed to fetch with default range:", defaultError.message);
-
-                // Fallback 2: Try with 'Sheet1' which is common default
-                try {
-                    response = await sheets.spreadsheets.values.get({
-                        auth,
-                        spreadsheetId: CURRENT_SHEET_ID,
-                        range: `Sheet1!A1:Z200`,
-                    });
-                    console.log("Successfully fetched data using 'Sheet1'");
-                } catch (sheet1Error) {
-                    // If this is an .xlsx file, provide helpful error
-                    throw new Error(
-                        `Unable to read sheet. If this is an .xlsx file, try opening it in Google Sheets and note the exact tab name, then configure sheetTabName in settings. Error: ${defaultError.message}`
-                    );
-                }
-            }
-        }
-
-        const rawData = response.data.values || [];
-        console.log(`📊 Fetched ${rawData.length} rows from restricted sheet`);
+        // Use the unified fetchSheetData function that handles both native sheets and .xlsx files
+        const rawData = await fetchSheetData(auth, CURRENT_SHEET_ID, sheetTabName);
+        console.log(`📊 Fetched ${rawData.length} rows from sheet`);
 
         // 2. Extract courses
         const courses = extractCourses(rawData);
@@ -770,53 +962,12 @@ exports.manualSync = onCall({
         // 3. Fetch restricted sheet
         console.log("📊 Fetching restricted sheet data...");
 
-        const sheets = google.sheets({ version: "v4" });
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        // Try to get data - use sheetTabName if available
-        // For .xlsx files, spreadsheets.get() doesn't work, so we use fallbacks
-        let response;
-        try {
-            response = await sheets.spreadsheets.values.get({
-                auth,
-                spreadsheetId: CURRENT_SHEET_ID,
-                range: `${sheetTabName}!A1:Z200`,
-            });
-        } catch (rangeError) {
-            console.log(`Sheet tab '${sheetTabName}' not found, trying without tab name...`);
-
-            // Fallback 1: Try without sheet name (gets first sheet by default)
-            // This works for both native sheets and .xlsx files
-            try {
-                response = await sheets.spreadsheets.values.get({
-                    auth,
-                    spreadsheetId: CURRENT_SHEET_ID,
-                    range: `A1:Z200`,
-                });
-                console.log("Successfully fetched data using default sheet");
-            } catch (defaultError) {
-                console.error("Failed to fetch with default range:", defaultError.message);
-
-                // Fallback 2: Try with 'Sheet1' which is common default
-                try {
-                    response = await sheets.spreadsheets.values.get({
-                        auth,
-                        spreadsheetId: CURRENT_SHEET_ID,
-                        range: `Sheet1!A1:Z200`,
-                    });
-                    console.log("Successfully fetched data using 'Sheet1'");
-                } catch (sheet1Error) {
-                    // If this is an .xlsx file, provide helpful error
-                    throw new Error(
-                        `Unable to read sheet. If this is an .xlsx file, try opening it in Google Sheets and note the exact tab name, then configure sheetTabName in settings. Error: ${defaultError.message}`
-                    );
-                }
-            }
-        }
-
-        const rawData = response.data.values || [];
-        console.log(`📊 Fetched ${rawData.length} rows from restricted sheet`);
+        // Use the unified fetchSheetData function that handles both native sheets and .xlsx files
+        const rawData = await fetchSheetData(auth, CURRENT_SHEET_ID, sheetTabName);
+        console.log(`📊 Fetched ${rawData.length} rows from sheet`);
 
         // 4. Extract courses and events
         const courses = extractCourses(rawData);
