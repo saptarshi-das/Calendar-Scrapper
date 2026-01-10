@@ -126,34 +126,45 @@ function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, 
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
-        const courseMatch = line.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
+
+        // Try multi-section format first: CourseName-A (Location)
+        let courseMatch = line.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
+        let courseName, section, location, courseCode;
 
         if (courseMatch) {
-            const [_, courseName, section, location] = courseMatch;
-            const courseCode = `${courseName}-${section}`;
-
-            if (selectedCourses.includes(courseCode)) {
-                const professor = professorLines[lineIndex] || professorLines[0] || "";
-
-                const event = {
-                    id: `${courseCode}-${location}-${date.toISOString()}-${timeSlot.start}`,
-                    courseCode,
-                    courseName,
-                    section,
-                    location,
-                    professor: professor.trim(),
-                    date,
-                    timeSlot,
-                    week,
-                    day,
-                    status: "active",
-                    isCancelled: false,
-                    isRed: false,
-                    hasStrikethrough: false,
-                };
-
-                events.push(event);
+            [, courseName, section, location] = courseMatch;
+            courseCode = `${courseName}-${section}`;
+        } else {
+            // Try single-section format: CourseName (Location) - e.g., SHRM (PT-1-3), CSM (PT-1-2)
+            const singleSectionMatch = line.match(/([A-Z][A-Za-z0-9&]+)\s*\(([^)]+)\)/);
+            if (singleSectionMatch) {
+                [, courseName, location] = singleSectionMatch;
+                section = "1"; // Default section for single-section courses
+                courseCode = courseName; // No section suffix for single-section courses
             }
+        }
+
+        if (courseCode && selectedCourses.includes(courseCode)) {
+            const professor = professorLines[lineIndex] || professorLines[0] || "";
+
+            const event = {
+                id: `${courseCode}-${location}-${date.toISOString()}-${timeSlot.start}`,
+                courseCode,
+                courseName,
+                section,
+                location,
+                professor: professor.trim(),
+                date,
+                timeSlot,
+                week,
+                day,
+                status: "active",
+                isCancelled: false,
+                isRed: false,
+                hasStrikethrough: false,
+            };
+
+            events.push(event);
         }
     }
 
@@ -172,12 +183,13 @@ function extractCourses(rawData) {
         for (let j = 2; j < row.length; j++) {
             const cell = row[j];
             if (cell && typeof cell === "string") {
-                const matches = cell.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/g);
-                if (matches) {
-                    matches.forEach((match) => {
-                        const courseMatch = match.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
+                // Match multi-section courses: CourseName-A (Location)
+                const multiSectionMatches = cell.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/g);
+                if (multiSectionMatches) {
+                    multiSectionMatches.forEach((match) => {
+                        const courseMatch = match.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
                         if (courseMatch) {
-                            const [_, courseName, section] = courseMatch;
+                            const [, courseName, section] = courseMatch;
                             const code = `${courseName}-${section}`;
 
                             if (!coursesSet.has(code)) {
@@ -187,6 +199,33 @@ function extractCourses(rawData) {
                                     code: code,
                                     name: courseName,
                                     section: section,
+                                    location: "",
+                                });
+                            }
+                        }
+                    });
+                }
+
+                // Match single-section courses: CourseName (Location) - e.g., SHRM, CSM, I4TS
+                // Only match if it's NOT already a multi-section format
+                const singleSectionMatches = cell.match(/\b([A-Z][A-Za-z0-9&]+)\s*\(([^)]+)\)/g);
+                if (singleSectionMatches) {
+                    singleSectionMatches.forEach((match) => {
+                        // Skip if this looks like a multi-section course (has -X before the parenthesis)
+                        if (/-[A-Z]\s*\(/.test(match)) return;
+
+                        const singleMatch = match.match(/\b([A-Z][A-Za-z0-9&]+)\s*\(([^)]+)\)/);
+                        if (singleMatch) {
+                            const [, courseName] = singleMatch;
+                            const code = courseName; // No section suffix
+
+                            if (!coursesSet.has(code)) {
+                                coursesSet.add(code);
+                                courses.push({
+                                    id: code.replace(/\s+/g, "-").toLowerCase(),
+                                    code: code,
+                                    name: courseName,
+                                    section: "1", // Default section
                                     location: "",
                                 });
                             }
@@ -488,12 +527,13 @@ exports.dailyCalendarSync = onSchedule({
         const config = configDoc.data();
         const CURRENT_SHEET_ID = config.scheduleSheetId;
         const sheetTabName = config.sheetTabName || DEFAULT_SHEET_NAME;
+        const sheetGid = config.sheetGid; // GID for .xlsx file support
 
         if (!CURRENT_SHEET_ID) {
             throw new Error("Sheet ID not configured. Please set it in the admin panel.");
         }
 
-        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}`);
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}, GID: ${sheetGid}`);
 
         // 2. Get admin user's OAuth token from Firestore
         console.log("🔐 Loading admin credentials...");
@@ -537,7 +577,8 @@ exports.dailyCalendarSync = onSchedule({
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        // Try to get data - use sheetTabName if available, otherwise just get first sheet
+        // Try to get data - use sheetTabName if available
+        // For .xlsx files, spreadsheets.get() doesn't work, so we use fallbacks
         let response;
         try {
             response = await sheets.spreadsheets.values.get({
@@ -546,20 +587,35 @@ exports.dailyCalendarSync = onSchedule({
                 range: `${sheetTabName}!A1:Z200`,
             });
         } catch (rangeError) {
-            console.log(`Sheet tab '${sheetTabName}' not found, trying to get spreadsheet info...`);
-            // Get spreadsheet info to find first sheet name
-            const spreadsheetInfo = await sheets.spreadsheets.get({
-                auth,
-                spreadsheetId: CURRENT_SHEET_ID,
-            });
-            const firstSheetName = spreadsheetInfo.data.sheets[0].properties.title;
-            console.log(`Using first sheet: ${firstSheetName}`);
+            console.log(`Sheet tab '${sheetTabName}' not found, trying without tab name...`);
 
-            response = await sheets.spreadsheets.values.get({
-                auth,
-                spreadsheetId: CURRENT_SHEET_ID,
-                range: `${firstSheetName}!A1:Z200`,
-            });
+            // Fallback 1: Try without sheet name (gets first sheet by default)
+            // This works for both native sheets and .xlsx files
+            try {
+                response = await sheets.spreadsheets.values.get({
+                    auth,
+                    spreadsheetId: CURRENT_SHEET_ID,
+                    range: `A1:Z200`,
+                });
+                console.log("Successfully fetched data using default sheet");
+            } catch (defaultError) {
+                console.error("Failed to fetch with default range:", defaultError.message);
+
+                // Fallback 2: Try with 'Sheet1' which is common default
+                try {
+                    response = await sheets.spreadsheets.values.get({
+                        auth,
+                        spreadsheetId: CURRENT_SHEET_ID,
+                        range: `Sheet1!A1:Z200`,
+                    });
+                    console.log("Successfully fetched data using 'Sheet1'");
+                } catch (sheet1Error) {
+                    // If this is an .xlsx file, provide helpful error
+                    throw new Error(
+                        `Unable to read sheet. If this is an .xlsx file, try opening it in Google Sheets and note the exact tab name, then configure sheetTabName in settings. Error: ${defaultError.message}`
+                    );
+                }
+            }
         }
 
         const rawData = response.data.values || [];
@@ -669,12 +725,13 @@ exports.manualSync = onCall({
         const config = configDoc.data();
         const CURRENT_SHEET_ID = config.scheduleSheetId;
         const sheetTabName = config.sheetTabName || DEFAULT_SHEET_NAME;
+        const sheetGid = config.sheetGid; // GID for .xlsx file support
 
         if (!CURRENT_SHEET_ID) {
             throw new Error("Sheet ID not configured. Please set it in settings.");
         }
 
-        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}`);
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}, GID: ${sheetGid}`);
 
         // 2. Get admin user's OAuth token
         console.log("🔐 Loading admin credentials...");
@@ -717,7 +774,8 @@ exports.manualSync = onCall({
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        // Try to get data - use sheetTabName if available, otherwise just get first sheet
+        // Try to get data - use sheetTabName if available
+        // For .xlsx files, spreadsheets.get() doesn't work, so we use fallbacks
         let response;
         try {
             response = await sheets.spreadsheets.values.get({
@@ -726,20 +784,35 @@ exports.manualSync = onCall({
                 range: `${sheetTabName}!A1:Z200`,
             });
         } catch (rangeError) {
-            console.log(`Sheet tab '${sheetTabName}' not found, trying to get spreadsheet info...`);
-            // Get spreadsheet info to find first sheet name
-            const spreadsheetInfo = await sheets.spreadsheets.get({
-                auth,
-                spreadsheetId: CURRENT_SHEET_ID,
-            });
-            const firstSheetName = spreadsheetInfo.data.sheets[0].properties.title;
-            console.log(`Using first sheet: ${firstSheetName}`);
+            console.log(`Sheet tab '${sheetTabName}' not found, trying without tab name...`);
 
-            response = await sheets.spreadsheets.values.get({
-                auth,
-                spreadsheetId: CURRENT_SHEET_ID,
-                range: `${firstSheetName}!A1:Z200`,
-            });
+            // Fallback 1: Try without sheet name (gets first sheet by default)
+            // This works for both native sheets and .xlsx files
+            try {
+                response = await sheets.spreadsheets.values.get({
+                    auth,
+                    spreadsheetId: CURRENT_SHEET_ID,
+                    range: `A1:Z200`,
+                });
+                console.log("Successfully fetched data using default sheet");
+            } catch (defaultError) {
+                console.error("Failed to fetch with default range:", defaultError.message);
+
+                // Fallback 2: Try with 'Sheet1' which is common default
+                try {
+                    response = await sheets.spreadsheets.values.get({
+                        auth,
+                        spreadsheetId: CURRENT_SHEET_ID,
+                        range: `Sheet1!A1:Z200`,
+                    });
+                    console.log("Successfully fetched data using 'Sheet1'");
+                } catch (sheet1Error) {
+                    // If this is an .xlsx file, provide helpful error
+                    throw new Error(
+                        `Unable to read sheet. If this is an .xlsx file, try opening it in Google Sheets and note the exact tab name, then configure sheetTabName in settings. Error: ${defaultError.message}`
+                    );
+                }
+            }
         }
 
         const rawData = response.data.values || [];

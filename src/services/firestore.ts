@@ -351,18 +351,24 @@ export class FirestoreService {
 
             const sheetId = match[1];
 
+            // Extract GID (sheet tab ID) from URL if present
+            // URL format: ...?gid=752189081#gid=752189081 or just ?gid=752189081
+            const gidMatch = sheetUrl.match(/[?&#]gid=(\d+)/);
+            const sheetGid = gidMatch ? gidMatch[1] : null;
+
             const configRef = doc(db, 'config', 'settings');
             await setDoc(
                 configRef,
                 {
                     scheduleSheetUrl: sheetUrl,
                     scheduleSheetId: sheetId,
+                    sheetGid: sheetGid, // Store the GID for .xlsx file support
                     lastUpdated: serverTimestamp(),
                 },
                 { merge: true }
             );
 
-            console.log('Schedule sheet URL updated:', sheetUrl);
+            console.log('Schedule sheet URL updated:', sheetUrl, 'GID:', sheetGid);
         } catch (error) {
             console.error('Error updating sheet URL:', error);
             throw error;
