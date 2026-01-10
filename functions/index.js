@@ -57,7 +57,7 @@ function parseTimeSlots(rawData) {
         for (let i = 2; i < row.length; i++) {
             const header = row[i];
             if (header && typeof header === "string") {
-                const timePattern = /(\d+[:.]\\d+[AP]M)\s*-\s*(\d+[:.]\\d+[AP]M)/g;
+                const timePattern = /(\d+[:.]\d+[AP]M)\s*-\s*(\d+[:.]\d+[AP]M)/g;
                 let match;
                 let lastMatch = null;
 
@@ -391,6 +391,12 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                                 timeZone: "Asia/Kolkata",
                             },
                             colorId: "9",
+                            reminders: {
+                                useDefault: false,
+                                overrides: [
+                                    { method: "popup", minutes: 10 },
+                                ],
+                            },
                             extendedProperties: {
                                 private: {
                                     scheduleEventId: event.id,
