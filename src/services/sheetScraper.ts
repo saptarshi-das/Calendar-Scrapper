@@ -94,17 +94,13 @@ export class SheetScraperService {
             for (let j = 2; j < row.length; j++) {
                 const cell = row[j];
                 if (cell && typeof cell === 'string') {
-                    // Extract course codes (format: "Fintech-B (PT-1-2)")
-                    // Pattern: CourseName-Section (Location)
-                    // Note: We only differentiate by course name and section, NOT by location
-                    const matches = cell.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/g);
-
-                    if (matches) {
-                        matches.forEach(match => {
-                            const courseMatch = match.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
+                    // Match multi-section courses: CourseName-A (Location)
+                    const multiSectionMatches = cell.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/g);
+                    if (multiSectionMatches) {
+                        multiSectionMatches.forEach(match => {
+                            const courseMatch = match.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
                             if (courseMatch) {
-                                const [_, courseName, section] = courseMatch;
-                                // Use only courseName-section as the unique identifier
+                                const [, courseName, section] = courseMatch;
                                 const code = `${courseName}-${section}`;
 
                                 if (!coursesSet.has(code)) {
@@ -114,7 +110,33 @@ export class SheetScraperService {
                                         code: code,
                                         name: courseName,
                                         section: section,
-                                        location: '', // Location varies per event, not per course
+                                        location: '',
+                                    });
+                                }
+                            }
+                        });
+                    }
+
+                    // Match single-section courses: CourseName (Location) - e.g., SHRM, CSM, I4TS
+                    const singleSectionMatches = cell.match(/\b([A-Z][A-Za-z0-9&]+)\s*\(([^)]+)\)/g);
+                    if (singleSectionMatches) {
+                        singleSectionMatches.forEach(match => {
+                            // Skip if this looks like a multi-section course (has -X before the parenthesis)
+                            if (/-[A-Z]\s*\(/.test(match)) return;
+
+                            const singleMatch = match.match(/\b([A-Z][A-Za-z0-9&]+)\s*\(([^)]+)\)/);
+                            if (singleMatch) {
+                                const [, courseName] = singleMatch;
+                                const code = courseName; // No section suffix
+
+                                if (!coursesSet.has(code)) {
+                                    coursesSet.add(code);
+                                    courses.push({
+                                        id: code.replace(/\s+/g, '-').toLowerCase(),
+                                        code: code,
+                                        name: courseName,
+                                        section: '1', // Default section for single-section courses
+                                        location: '',
                                     });
                                 }
                             }
@@ -323,38 +345,49 @@ export class SheetScraperService {
             // Check for strikethrough (would need HTML parsing)
             const hasStrikethrough = false; // Will be implemented with proper Sheets API
 
-            // Extract course code (format: "Fintech-B (PT-1-2)")
-            const courseMatch = line.match(/([A-Z][A-Za-z&-]+)-([A-Z])\s*\(([^)]+)\)/);
+            // Try multi-section format first: CourseName-A (Location)
+            let courseMatch = line.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
+            let courseName: string | undefined;
+            let section: string | undefined;
+            let location: string | undefined;
+            let courseCode: string | undefined;
+
             if (courseMatch) {
-                const [_, courseName, section, location] = courseMatch;
-                // Course code is just name-section (without location)
-                const courseCode = `${courseName}-${section}`;
-
-                // Only include if user selected this course
-                if (selectedCourses.includes(courseCode)) {
-                    // Get professor from corresponding line in professorCell
-                    // If there are multiple courses in a cell, match by line index
-                    const professor = professorLines[lineIndex] || professorLines[0] || '';
-
-                    const event: ScheduleEvent = {
-                        id: `${courseCode}-${location}-${date.toISOString()}-${timeSlot.start}`,
-                        courseCode,
-                        courseName,
-                        section,
-                        location, // Store the specific location for this event
-                        professor: professor.trim(),
-                        date,
-                        timeSlot,
-                        week,
-                        day,
-                        status: hasStrikethrough || isRed ? 'cancelled' : 'active',
-                        isCancelled: hasStrikethrough || isRed,
-                        isRed,
-                        hasStrikethrough,
-                    };
-
-                    events.push(event);
+                [, courseName, section, location] = courseMatch;
+                courseCode = `${courseName}-${section}`;
+            } else {
+                // Try single-section format: CourseName (Location) - e.g., SHRM (PT-1-3), CSM (PT-1-2)
+                const singleSectionMatch = line.match(/([A-Z][A-Za-z0-9&]+)\s*\(([^)]+)\)/);
+                if (singleSectionMatch) {
+                    [, courseName, location] = singleSectionMatch;
+                    section = '1'; // Default section for single-section courses
+                    courseCode = courseName; // No section suffix for single-section courses
                 }
+            }
+
+            // Only include if user selected this course
+            if (courseCode && courseName && section && location && selectedCourses.includes(courseCode)) {
+                // Get professor from corresponding line in professorCell
+                const professor = professorLines[lineIndex] || professorLines[0] || '';
+
+                const event: ScheduleEvent = {
+                    id: `${courseCode}-${location}-${date.toISOString()}-${timeSlot.start}`,
+                    courseCode,
+                    courseName,
+                    section,
+                    location, // Store the specific location for this event
+                    professor: professor.trim(),
+                    date,
+                    timeSlot,
+                    week,
+                    day,
+                    status: hasStrikethrough || isRed ? 'cancelled' : 'active',
+                    isCancelled: hasStrikethrough || isRed,
+                    isRed,
+                    hasStrikethrough,
+                };
+
+                events.push(event);
             }
         }
 
