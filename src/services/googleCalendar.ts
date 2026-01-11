@@ -133,6 +133,12 @@ export class GoogleCalendarService {
                     timeZone: 'Asia/Kolkata',
                 },
                 colorId: '9', // Blue for all active classes
+                reminders: {
+                    useDefault: false,
+                    overrides: [
+                        { method: 'popup', minutes: 10 },
+                    ],
+                },
                 extendedProperties: {
                     private: {
                         scheduleEventId: event.id,
@@ -179,6 +185,12 @@ export class GoogleCalendarService {
                     timeZone: 'Asia/Kolkata',
                 },
                 colorId: '9', // Blue for all active classes
+                reminders: {
+                    useDefault: false,
+                    overrides: [
+                        { method: 'popup', minutes: 10 },
+                    ],
+                },
                 extendedProperties: {
                     private: {
                         scheduleEventId: event.id,
