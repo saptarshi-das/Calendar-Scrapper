@@ -81,9 +81,18 @@ function App() {
     try {
       setLoading(true);
 
-      // If admin, scrape and save to Firestore
-      if (FirestoreService.isAdmin(firebaseUser.email || '')) {
-        // Use the Google OAuth access token, not Firebase ID token
+      // First try to load from Firestore (works for both admin and regular users)
+      const firestoreCourses = await FirestoreService.getCourses();
+
+      if (firestoreCourses.length > 0) {
+        // Data exists in Firestore, use it
+        setCourses(firestoreCourses);
+      } else if (FirestoreService.isAdmin(firebaseUser.email || '')) {
+        // Firestore is empty and user is admin - do initial scrape from frontend
+        // NOTE: This frontend scraper CANNOT detect cancelled classes (strikethrough/red)
+        // Admin should run "Sync Now" from Settings after login for full detection
+        console.warn('⚠️ Initial scrape from frontend - cancelled classes will NOT be detected. Use Settings > Sync Now for full detection.');
+
         const rawData = await SheetScraperService.fetchSheetData(accessToken || googleAccessToken || undefined);
         const extractedCourses = SheetScraperService.extractCourses(rawData);
         const allEvents = SheetScraperService.parseScheduleEvents(
@@ -95,15 +104,14 @@ function App() {
         await FirestoreService.storeScheduleData(extractedCourses, allEvents);
         setCourses(extractedCourses);
       } else {
-        // Regular user, load from Firestore
-        const firestoreCourses = await FirestoreService.getCourses();
-        setCourses(firestoreCourses);
+        // Regular user, no data in Firestore - show error
+        throw new Error('No schedule data available. Please ask admin to sync first.');
       }
 
       setAppState('select-courses');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading courses:', err);
-      setError('Failed to load courses from schedule');
+      setError(err.message || 'Failed to load courses from schedule');
     } finally {
       setLoading(false);
     }
@@ -266,7 +274,8 @@ function App() {
       });
       await FirestoreService.markUserAsSynced(user.uid, calendarEventIds);
 
-      setScheduleEvents(activeEvents);
+      // Store ALL events (including cancelled) for Dashboard to display
+      setScheduleEvents(previewEvents);
       setAppState('dashboard');
 
     } catch (err: any) {
@@ -307,9 +316,11 @@ function App() {
       // Reload events from Firestore
       const events = await FirestoreService.getScheduleEventsForCourses(selectedCourses);
 
+      // Store ALL events for Dashboard (Dashboard will separate active/cancelled)
+      setScheduleEvents(events);
+
       // Filter out cancelled events - we don't want them in the calendar
       const activeEvents = events.filter(e => !e.isCancelled);
-      setScheduleEvents(activeEvents);
 
       // Re-sync to calendar
       if (googleAccessToken) {
