@@ -632,12 +632,14 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         });
 
         const existingEvents = existingEventsRes.data.items || [];
+        console.log(`   Found ${existingEvents.length} existing calendar events from today onwards`);
 
         // Build two maps for existing events:
         // 1. By full scheduleEventId (for exact match)
         // 2. By base key (courseCode-date-time) for detecting location changes
         const existingEventsMap = new Map();
         const existingEventsByBaseKey = new Map();
+        const existingEventsBySummaryKey = new Map();  // Fallback: match by title+date+time
 
         existingEvents.forEach((e) => {
             const scheduleId = e.extendedProperties?.private?.scheduleEventId;
@@ -646,13 +648,26 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 existingEventsMap.set(scheduleId, e);
 
                 // Extract base key from the event (courseCode + date + time, excluding location)
-                // scheduleEventId format: "courseCode-location-date-time"
-                // We want: "courseCode-date-time" as base key
+                // Use local date/time from Google Calendar event (already in correct timezone)
                 if (courseCode && e.start?.dateTime) {
                     const eventDate = new Date(e.start.dateTime);
-                    const baseKey = `${courseCode}-${eventDate.toISOString().split('T')[0]}-${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                    // Use local date parts to create consistent key
+                    const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+                    const timeStr = `${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                    const baseKey = `${courseCode}-${dateStr}-${timeStr}`;
                     existingEventsByBaseKey.set(baseKey, e);
+                    console.log(`   Existing event baseKey: ${baseKey}, location: ${e.location || 'N/A'}`);
                 }
+            }
+
+            // Also create a fallback key using the event summary (title) + date + time
+            // This helps match events even if courseCode extended property is missing
+            if (e.start?.dateTime && e.summary) {
+                const eventDate = new Date(e.start.dateTime);
+                const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+                const timeStr = `${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                const summaryKey = `${e.summary}-${dateStr}-${timeStr}`;
+                existingEventsBySummaryKey.set(summaryKey, e);
             }
         });
 
@@ -662,7 +677,10 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         userEvents.forEach((e) => {
             const eventDate = new Date(e.date);
             const [hours, minutes] = parseTimeForKey(e.timeSlot.start);
-            const baseKey = `${e.courseCode}-${eventDate.toISOString().split('T')[0]}-${hours}:${String(minutes).padStart(2, '0')}`;
+            // Use local date parts to create consistent key
+            const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+            const timeStr = `${hours}:${String(minutes).padStart(2, '0')}`;
+            const baseKey = `${e.courseCode}-${dateStr}-${timeStr}`;
             newEventsByBaseKey.set(baseKey, e);
         });
 
@@ -683,23 +701,38 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 if (exactMatch.location !== event.location ||
                     !exactMatch.description?.includes(event.professor)) {
                     eventsToUpdate.push({ existing: exactMatch, new: event });
+                    console.log(`   Will update (exact match, details changed): ${event.courseCode} - ${event.location}`);
                 }
             } else {
                 // No exact match - check if there's an event with same base key but different location
                 const eventDate = new Date(event.date);
                 const [hours, minutes] = parseTimeForKey(event.timeSlot.start);
-                const baseKey = `${event.courseCode}-${eventDate.toISOString().split('T')[0]}-${hours}:${String(minutes).padStart(2, '0')}`;
+                const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+                const timeStr = `${hours}:${String(minutes).padStart(2, '0')}`;
+                const baseKey = `${event.courseCode}-${dateStr}-${timeStr}`;
 
                 const baseMatch = existingEventsByBaseKey.get(baseKey);
                 if (baseMatch) {
                     // Location changed - update the existing event
                     eventsToUpdate.push({ existing: baseMatch, new: event });
+                    console.log(`   Will update (location changed): ${event.courseCode} from ${baseMatch.location} to ${event.location}`);
                 } else {
-                    // Truly new event
-                    eventsToCreate.push(event);
+                    // Try fallback: match by summary (title) + date + time
+                    const summaryKey = `${event.courseName}-${event.section}-${dateStr}-${timeStr}`;
+                    const summaryMatch = existingEventsBySummaryKey.get(summaryKey);
+                    if (summaryMatch) {
+                        eventsToUpdate.push({ existing: summaryMatch, new: event });
+                        console.log(`   Will update (fallback match by title): ${event.courseCode} from ${summaryMatch.location} to ${event.location}`);
+                    } else {
+                        // Truly new event
+                        eventsToCreate.push(event);
+                        console.log(`   Will create new: ${event.courseCode} - ${event.location} (baseKey: ${baseKey})`);
+                    }
                 }
             }
         }
+
+        console.log(`   Events to create: ${eventsToCreate.length}, Events to update: ${eventsToUpdate.length}`);
 
         // Create new events in batches
         for (let i = 0; i < eventsToCreate.length; i += BATCH_SIZE) {
@@ -795,7 +828,9 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         userEvents.forEach((e) => {
             const eventDate = new Date(e.date);
             const [hours, minutes] = parseTimeForKey(e.timeSlot.start);
-            const baseKey = `${e.courseCode}-${eventDate.toISOString().split('T')[0]}-${hours}:${String(minutes).padStart(2, '0')}`;
+            const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+            const timeStr = `${hours}:${String(minutes).padStart(2, '0')}`;
+            const baseKey = `${e.courseCode}-${dateStr}-${timeStr}`;
             newBaseKeys.add(baseKey);
         });
 
@@ -806,7 +841,9 @@ async function syncUserCalendar(user, allEvents, accessToken) {
             // Check if this event's base key is in the new events
             if (courseCode && existingEvent.start?.dateTime) {
                 const eventDate = new Date(existingEvent.start.dateTime);
-                const baseKey = `${courseCode}-${eventDate.toISOString().split('T')[0]}-${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+                const timeStr = `${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                const baseKey = `${courseCode}-${dateStr}-${timeStr}`;
                 // If base key exists in new events, this event should be updated, not deleted
                 if (newBaseKeys.has(baseKey)) {
                     return false;
