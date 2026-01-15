@@ -614,39 +614,94 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         console.log(`   Using calendar: ${calendarId}`);
 
         // Get existing events created by this app
+        // Use start of today (in IST) to include today's past events for location updates
         const now = new Date();
+        const startOfToday = new Date(now);
+        startOfToday.setHours(0, 0, 0, 0);
+
         const threeMonthsFromNow = new Date();
         threeMonthsFromNow.setMonth(now.getMonth() + 3);
 
         const existingEventsRes = await calendar.events.list({
             auth,
             calendarId: calendarId,
-            timeMin: now.toISOString(),
+            timeMin: startOfToday.toISOString(),
             timeMax: threeMonthsFromNow.toISOString(),
             privateExtendedProperty: [`appCreated=true`],
             maxResults: 2500,
         });
 
         const existingEvents = existingEventsRes.data.items || [];
+
+        // Build two maps for existing events:
+        // 1. By full scheduleEventId (for exact match)
+        // 2. By base key (courseCode-date-time) for detecting location changes
         const existingEventsMap = new Map();
+        const existingEventsByBaseKey = new Map();
+
         existingEvents.forEach((e) => {
             const scheduleId = e.extendedProperties?.private?.scheduleEventId;
+            const courseCode = e.extendedProperties?.private?.courseCode;
             if (scheduleId) {
                 existingEventsMap.set(scheduleId, e);
+
+                // Extract base key from the event (courseCode + date + time, excluding location)
+                // scheduleEventId format: "courseCode-location-date-time"
+                // We want: "courseCode-date-time" as base key
+                if (courseCode && e.start?.dateTime) {
+                    const eventDate = new Date(e.start.dateTime);
+                    const baseKey = `${courseCode}-${eventDate.toISOString().split('T')[0]}-${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                    existingEventsByBaseKey.set(baseKey, e);
+                }
             }
         });
 
-        // Create map of new events
+        // Create map of new events with base key for comparison
         const newEventsMap = new Map(userEvents.map((e) => [e.id, e]));
+        const newEventsByBaseKey = new Map();
+        userEvents.forEach((e) => {
+            const eventDate = new Date(e.date);
+            const [hours, minutes] = parseTimeForKey(e.timeSlot.start);
+            const baseKey = `${e.courseCode}-${eventDate.toISOString().split('T')[0]}-${hours}:${String(minutes).padStart(2, '0')}`;
+            newEventsByBaseKey.set(baseKey, e);
+        });
 
         let created = 0;
+        let updated = 0;
         let deleted = 0;
 
-        // Add new events
-        // Add new events (in batches to avoid rate limits but improve speed)
-        const eventsToCreate = userEvents.filter(event => !existingEventsMap.has(event.id));
         const BATCH_SIZE = 5;
 
+        // Process events: create new ones and update existing ones with changed details
+        const eventsToCreate = [];
+        const eventsToUpdate = [];
+
+        for (const event of userEvents) {
+            const exactMatch = existingEventsMap.get(event.id);
+            if (exactMatch) {
+                // Exact match exists - check if we need to update any details
+                if (exactMatch.location !== event.location ||
+                    !exactMatch.description?.includes(event.professor)) {
+                    eventsToUpdate.push({ existing: exactMatch, new: event });
+                }
+            } else {
+                // No exact match - check if there's an event with same base key but different location
+                const eventDate = new Date(event.date);
+                const [hours, minutes] = parseTimeForKey(event.timeSlot.start);
+                const baseKey = `${event.courseCode}-${eventDate.toISOString().split('T')[0]}-${hours}:${String(minutes).padStart(2, '0')}`;
+
+                const baseMatch = existingEventsByBaseKey.get(baseKey);
+                if (baseMatch) {
+                    // Location changed - update the existing event
+                    eventsToUpdate.push({ existing: baseMatch, new: event });
+                } else {
+                    // Truly new event
+                    eventsToCreate.push(event);
+                }
+            }
+        }
+
+        // Create new events in batches
         for (let i = 0; i < eventsToCreate.length; i += BATCH_SIZE) {
             const batch = eventsToCreate.slice(i, i + BATCH_SIZE);
             await Promise.all(batch.map(async (event) => {
@@ -689,10 +744,75 @@ async function syncUserCalendar(user, allEvents, accessToken) {
             }));
         }
 
-        // Delete events that no longer exist
-        // Delete events that no longer exist (in batches)
+        // Update events with changed details (location, professor, etc.) in batches
+        for (let i = 0; i < eventsToUpdate.length; i += BATCH_SIZE) {
+            const batch = eventsToUpdate.slice(i, i + BATCH_SIZE);
+            await Promise.all(batch.map(async ({ existing, new: event }) => {
+                try {
+                    await calendar.events.update({
+                        auth,
+                        calendarId: calendarId,
+                        eventId: existing.id,
+                        resource: {
+                            summary: `${event.courseName}-${event.section}`,
+                            location: event.location,
+                            description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}`,
+                            start: {
+                                dateTime: createDateTime(event.date, event.timeSlot.start),
+                                timeZone: "Asia/Kolkata",
+                            },
+                            end: {
+                                dateTime: createDateTime(event.date, event.timeSlot.end),
+                                timeZone: "Asia/Kolkata",
+                            },
+                            colorId: "9",
+                            reminders: {
+                                useDefault: false,
+                                overrides: [
+                                    { method: "popup", minutes: 10 },
+                                ],
+                            },
+                            extendedProperties: {
+                                private: {
+                                    scheduleEventId: event.id,
+                                    courseCode: event.courseCode,
+                                    appCreated: "true",
+                                },
+                            },
+                        },
+                    });
+                    updated++;
+                    console.log(`Updated event: ${event.courseCode} - location: ${event.location}`);
+                } catch (err) {
+                    console.error(`Failed to update event ${event.id}:`, err.message);
+                }
+            }));
+        }
+
+        // Delete events that no longer exist in schedule
+        // Build set of base keys from new events to avoid deleting events that just got their location changed
+        const newBaseKeys = new Set();
+        userEvents.forEach((e) => {
+            const eventDate = new Date(e.date);
+            const [hours, minutes] = parseTimeForKey(e.timeSlot.start);
+            const baseKey = `${e.courseCode}-${eventDate.toISOString().split('T')[0]}-${hours}:${String(minutes).padStart(2, '0')}`;
+            newBaseKeys.add(baseKey);
+        });
+
         const eventsToDelete = existingEvents.filter(existingEvent => {
             const scheduleId = existingEvent.extendedProperties?.private?.scheduleEventId;
+            const courseCode = existingEvent.extendedProperties?.private?.courseCode;
+
+            // Check if this event's base key is in the new events
+            if (courseCode && existingEvent.start?.dateTime) {
+                const eventDate = new Date(existingEvent.start.dateTime);
+                const baseKey = `${courseCode}-${eventDate.toISOString().split('T')[0]}-${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
+                // If base key exists in new events, this event should be updated, not deleted
+                if (newBaseKeys.has(baseKey)) {
+                    return false;
+                }
+            }
+
             return scheduleId && !newEventsMap.has(scheduleId);
         });
 
@@ -712,7 +832,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
             }));
         }
 
-        return { created, deleted };
+        return { created, updated, deleted };
     } catch (error) {
         console.error("Error syncing calendar:", error);
         throw error;
@@ -736,6 +856,24 @@ function createDateTime(date, time) {
     const dateTime = new Date(date);
     dateTime.setHours(hours, minutes, 0, 0);
     return dateTime.toISOString();
+}
+
+/**
+ * Parse time string to hours and minutes for generating consistent base keys
+ * Returns [hours, minutes] in 24-hour format
+ */
+function parseTimeForKey(time) {
+    const timeMatch = time.match(/(\d+):(\d+)(AM|PM)/);
+    if (!timeMatch) return [0, 0];
+
+    let hours = parseInt(timeMatch[1]);
+    const minutes = parseInt(timeMatch[2]);
+    const period = timeMatch[3];
+
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+
+    return [hours, minutes];
 }
 
 
