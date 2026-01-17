@@ -918,6 +918,7 @@ function parseTimeForKey(time) {
 /**
  * Manual sync function - callable by admin from frontend
  * Same logic as daily sync but triggered on demand
+ * Rate limited: Max 10 calls per hour, 50 per day
  */
 exports.manualSync = onCall({
     memory: "512MiB",
@@ -929,10 +930,38 @@ exports.manualSync = onCall({
         throw new Error("Unauthorized: Only admin can trigger manual sync");
     }
 
+    // Rate limiting check
+    const db = admin.firestore();
+    const rateLimitRef = db.collection("rateLimits").doc("manualSync");
+    const rateLimitDoc = await rateLimitRef.get();
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    if (rateLimitDoc.exists) {
+        const data = rateLimitDoc.data();
+        const calls = data.calls || [];
+
+        // Filter calls within the last hour and day
+        const callsLastHour = calls.filter(c => new Date(c) > oneHourAgo);
+        const callsLastDay = calls.filter(c => new Date(c) > oneDayAgo);
+
+        if (callsLastHour.length >= 10) {
+            throw new Error("Rate limit exceeded: Maximum 10 syncs per hour. Please wait.");
+        }
+        if (callsLastDay.length >= 50) {
+            throw new Error("Rate limit exceeded: Maximum 50 syncs per day. Please wait until tomorrow.");
+        }
+    }
+
+    // Log this call for rate limiting (reuse existing variables)
+    const existingCalls = rateLimitDoc.exists ? (rateLimitDoc.data().calls || []) : [];
+    const recentCalls = existingCalls.filter(c => new Date(c) > oneDayAgo);
+    await rateLimitRef.set({ calls: [...recentCalls, now.toISOString()] });
+
     console.log("🚀 Starting MANUAL calendar sync (triggered by admin)");
 
     try {
-        const db = admin.firestore();
 
         // 1. Load sheet ID from configuration
         console.log("📋 Loading sheet configuration...");
@@ -1073,6 +1102,7 @@ exports.manualSync = onCall({
  * Exchange OAuth authorization code for tokens
  * This is needed because Firebase Auth doesn't provide Google OAuth refresh tokens
  * The frontend sends the auth code, and we exchange it for access + refresh tokens
+ * Rate limited: Max 20 calls per hour per IP
  */
 exports.exchangeOAuthCode = onRequest({
     cors: true,
@@ -1083,6 +1113,32 @@ exports.exchangeOAuthCode = onRequest({
     if (req.method !== "POST") {
         res.status(405).json({ error: "Method not allowed" });
         return;
+    }
+
+    // Rate limiting by IP
+    const clientIp = req.headers["x-forwarded-for"] || req.connection.remoteAddress || "unknown";
+    const ipHash = Buffer.from(clientIp).toString("base64").slice(0, 20); // Hash IP for privacy
+
+    const db = admin.firestore();
+    const rateLimitRef = db.collection("rateLimits").doc(`oauth_${ipHash}`);
+    const rateLimitDoc = await rateLimitRef.get();
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+    if (rateLimitDoc.exists) {
+        const data = rateLimitDoc.data();
+        const calls = (data.calls || []).filter(c => new Date(c) > oneHourAgo);
+
+        if (calls.length >= 20) {
+            res.status(429).json({ error: "Rate limit exceeded: Too many requests. Please wait an hour." });
+            return;
+        }
+
+        // Update rate limit record
+        await rateLimitRef.set({ calls: [...calls, now.toISOString()] });
+    } else {
+        // Create new rate limit record
+        await rateLimitRef.set({ calls: [now.toISOString()] });
     }
 
     try {
