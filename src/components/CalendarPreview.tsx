@@ -182,7 +182,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                     <ul>
                         <li>
                             ✅ After confirmation, these events will be added to your Google
-                            Calendar
+                            Calendar <strong>(this takes 3-4 minutes)</strong>
                         </li>
                         <li>
                             🔄 Your calendar will automatically update daily with any schedule
@@ -218,7 +218,7 @@ const CalendarPreview: React.FC<CalendarPreviewProps> = ({
                         </>
                     ) : (
                         <>
-                            Confirm & Add to Calendar
+                            Confirm & Add to Calendar (3-4 mins)
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                                 <path
                                     d="M5 12h14M12 5l7 7-7 7"
