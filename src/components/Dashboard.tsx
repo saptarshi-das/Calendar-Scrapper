@@ -118,38 +118,40 @@ const Dashboard: React.FC<DashboardProps> = ({
                                     : '⚠️ Auto-sync is disabled. You will not receive calendar updates.'}
                             </p>
                         </div>
-                        <button
-                            className="btn btn-primary"
-                            onClick={onResync}
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <>
-                                    <div className="spinner-small"></div>
-                                    Syncing...
-                                </>
-                            ) : (
-                                <>
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                                        <path
-                                            d="M1 4v6h6M23 20v-6h-6"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                        <path
-                                            d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
-                                    Sync Now
-                                </>
-                            )}
-                        </button>
+                        {isAdmin && (
+                            <button
+                                className="btn btn-primary"
+                                onClick={onResync}
+                                disabled={loading}
+                            >
+                                {loading ? (
+                                    <>
+                                        <div className="spinner-small"></div>
+                                        Syncing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                            <path
+                                                d="M1 4v6h6M23 20v-6h-6"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                            <path
+                                                d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                        </svg>
+                                        Sync Now
+                                    </>
+                                )}
+                            </button>
+                        )}
                     </div>
 
                     <div className="sync-status">
@@ -159,14 +161,21 @@ const Dashboard: React.FC<DashboardProps> = ({
                         </div>
 
                         {onToggleSync && (
-                            <button
-                                className={`btn ${syncEnabled ? 'btn-secondary' : 'btn-primary'}`}
-                                onClick={onToggleSync}
-                                disabled={loading}
-                                style={{ marginLeft: 'auto', fontSize: '0.875rem' }}
-                            >
-                                {syncEnabled ? '🔕 Unsubscribe' : '🔔 Resubscribe'}
-                            </button>
+                            <div className="toggle-sync-container" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span className="toggle-sync-hint" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '200px', textAlign: 'right' }}>
+                                    {syncEnabled
+                                        ? 'Stop receiving daily calendar updates (existing events will remain)'
+                                        : 'Resume receiving daily calendar updates'}
+                                </span>
+                                <button
+                                    className={`btn ${syncEnabled ? 'btn-secondary' : 'btn-primary'}`}
+                                    onClick={onToggleSync}
+                                    disabled={loading}
+                                    style={{ fontSize: '0.875rem' }}
+                                >
+                                    {syncEnabled ? '🔕 Unsubscribe' : '🔔 Resubscribe'}
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>
