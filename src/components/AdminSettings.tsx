@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FirestoreService } from '../services/firestore';
+import { GoogleOAuthService } from '../services/googleOAuth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 interface AdminSettingsProps {
@@ -10,6 +11,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
     const [sheetUrl, setSheetUrl] = useState('');
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [authorizing, setAuthorizing] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
     useEffect(() => {
@@ -77,6 +79,26 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
         }
     };
 
+    const handleAuthorizeAutoSync = async () => {
+        try {
+            setAuthorizing(true);
+            setMessage({
+                type: 'info',
+                text: '🔐 Redirecting to Google for authorization...',
+            });
+
+            // This will redirect to Google's OAuth page
+            await GoogleOAuthService.startOAuthFlow();
+        } catch (error: any) {
+            console.error('OAuth authorization error:', error);
+            setMessage({
+                type: 'error',
+                text: `❌ Authorization failed: ${error.message}`,
+            });
+            setAuthorizing(false);
+        }
+    };
+
     return (
         <div style={{
             position: 'fixed',
@@ -97,6 +119,8 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                 maxWidth: '600px',
                 width: '90%',
                 boxShadow: 'var(--shadow-xl)',
+                maxHeight: '90vh',
+                overflowY: 'auto',
             }}>
                 <h2 style={{
                     color: 'var(--text-primary)',
@@ -105,6 +129,58 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                 }}>
                     ⚙️ Admin Settings
                 </h2>
+
+                {/* Auto-Sync Authorization Section */}
+                <div style={{
+                    padding: '1rem',
+                    background: 'rgba(33, 150, 243, 0.05)',
+                    borderRadius: '8px',
+                    marginBottom: '1.5rem',
+                    border: '1px solid rgba(33, 150, 243, 0.2)',
+                }}>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '1rem',
+                    }}>
+                        <div>
+                            <h3 style={{
+                                color: 'var(--text-primary)',
+                                fontSize: '1rem',
+                                marginBottom: '0.25rem',
+                            }}>
+                                🔐 Authorize Auto-Sync
+                            </h3>
+                            <p style={{
+                                color: 'var(--text-muted)',
+                                fontSize: '0.75rem',
+                            }}>
+                                Required for daily 2 AM automatic calendar sync. Click to grant permanent access.
+                            </p>
+                        </div>
+                        <button
+                            onClick={handleAuthorizeAutoSync}
+                            disabled={authorizing}
+                            style={{
+                                padding: '10px 20px',
+                                background: authorizing
+                                    ? 'var(--bg-tertiary)'
+                                    : 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)',
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: authorizing ? 'var(--text-muted)' : '#fff',
+                                cursor: authorizing ? 'not-allowed' : 'pointer',
+                                fontSize: '0.9rem',
+                                fontWeight: 'bold',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {authorizing ? '⏳ Redirecting...' : '🔑 Authorize'}
+                        </button>
+                    </div>
+                </div>
 
                 {/* Sheet URL Section */}
                 <div style={{ marginBottom: '1.5rem' }}>

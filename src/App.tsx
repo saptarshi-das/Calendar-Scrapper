@@ -50,6 +50,14 @@ function App() {
         setUser(userData);
         setIsAdmin(FirestoreService.isAdmin(firebaseUser.email || ''));
 
+        // Check for access token from OAuth callback
+        const storedToken = sessionStorage.getItem('google_access_token');
+        if (storedToken) {
+          setGoogleAccessToken(storedToken);
+          await GoogleCalendarService.initializeGAPI();
+          GoogleCalendarService.setAccessToken(storedToken);
+        }
+
         // Check if user has existing selection
         const userSelection = await FirestoreService.getUserCourseSelection(firebaseUser.uid);
 
@@ -139,6 +147,11 @@ function App() {
       setLoading(true);
       setError(null);
 
+      // Check if this should be an admin OAuth flow
+      // We'll check if the user wants to enable auto-sync (admin feature)
+      // For now, we'll use the standard Firebase popup for all users
+      // Admin can use the "Authorize for Auto-Sync" button in settings
+
       const result = await signInWithPopup(auth, googleProvider);
 
       // Get the Google OAuth access token from credentials
@@ -147,39 +160,16 @@ function App() {
 
       if (accessToken) {
         setGoogleAccessToken(accessToken);
+        sessionStorage.setItem('google_access_token', accessToken);
+
         // Initialize Google Calendar API with the access token
         await GoogleCalendarService.initializeGAPI();
         GoogleCalendarService.setAccessToken(accessToken);
 
-        // If admin, save OAuth tokens for Cloud Function to use
+        // For regular login, we don't have a refresh token (Firebase doesn't provide it)
+        // Admin will need to use "Authorize for Auto-Sync" to get a proper refresh token
         if (result.user && FirestoreService.isAdmin(result.user.email || '')) {
-          // Get refresh token from the OAuth response
-          // Note: Firebase doesn't expose refresh token directly, but we can get it from user credential
-          const oauthCredential = credential as any;
-          const refreshToken = oauthCredential.refreshToken || result.user.refreshToken;
-
-          if (refreshToken) {
-            // Calculate token expiry (typically 1 hour from now)
-            const expiresAt = new Date(Date.now() + 3600 * 1000);
-
-            await FirestoreService.saveAdminOAuthTokens(
-              result.user.uid,
-              accessToken,
-              refreshToken,
-              expiresAt
-            );
-            console.log('✅ Admin OAuth tokens saved for Cloud Function');
-
-            // Initialize sheet URL if not set
-            const currentSheetUrl = await FirestoreService.getScheduleSheetUrl();
-            if (!currentSheetUrl) {
-              const defaultSheetUrl = 'https://docs.google.com/spreadsheets/d/1e3p34_yQCwWjeWeUkESr1TR5y0zoelkjfSUWfBSP7Y4/edit';
-              await FirestoreService.updateScheduleSheetUrl(defaultSheetUrl);
-              console.log('✅ Default sheet URL initialized');
-            }
-          } else {
-            console.warn('⚠️ Could not get refresh token - Cloud Function may not work');
-          }
+          console.log('ℹ️ Admin logged in. For auto-sync to work, use "Authorize for Auto-Sync" in Settings.');
         }
       } else {
         throw new Error('Failed to get Google access token. Please try again.');

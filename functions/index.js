@@ -1,4 +1,5 @@
-const { onCall } = require("firebase-functions/v2/https");
+const { onCall, onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const { google } = require("googleapis");
@@ -1065,5 +1066,277 @@ exports.manualSync = onCall({
     } catch (error) {
         console.error("💥 Manual sync failed:", error);
         throw new Error(error.message || "Sync failed");
+    }
+});
+
+/**
+ * Exchange OAuth authorization code for tokens
+ * This is needed because Firebase Auth doesn't provide Google OAuth refresh tokens
+ * The frontend sends the auth code, and we exchange it for access + refresh tokens
+ */
+exports.exchangeOAuthCode = onRequest({
+    cors: true,
+    memory: "256MiB",
+    timeoutSeconds: 30,
+}, async (req, res) => {
+    // Only allow POST
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+    }
+
+    try {
+        const { code, codeVerifier, redirectUri } = req.body;
+
+        if (!code || !codeVerifier || !redirectUri) {
+            res.status(400).json({ error: "Missing required parameters: code, codeVerifier, redirectUri" });
+            return;
+        }
+
+        console.log("🔐 Exchanging OAuth code for tokens...");
+
+        // Exchange the authorization code for tokens
+        const tokenResponse = await axios.post("https://oauth2.googleapis.com/token", {
+            code,
+            client_id: process.env.VITE_GOOGLE_CLIENT_ID,
+            client_secret: process.env.VITE_GOOGLE_CLIENT_SECRET,
+            redirect_uri: redirectUri,
+            grant_type: "authorization_code",
+            code_verifier: codeVerifier,
+        });
+
+        const tokens = tokenResponse.data;
+
+        if (!tokens.refresh_token) {
+            console.warn("⚠️ No refresh token received - user may have already authorized this app");
+        } else {
+            console.log("✅ Got refresh token!");
+        }
+
+        // Get user email from the access token
+        const userInfoResponse = await axios.get("https://www.googleapis.com/oauth2/v2/userinfo", {
+            headers: {
+                Authorization: `Bearer ${tokens.access_token}`,
+            },
+        });
+
+        const email = userInfoResponse.data.email;
+        console.log(`✅ OAuth exchange successful for ${email}`);
+
+        res.json({
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expires_in: tokens.expires_in,
+            email: email,
+        });
+
+    } catch (error) {
+        console.error("❌ OAuth code exchange failed:", error.response?.data || error.message);
+        res.status(500).json({
+            error: error.response?.data?.error_description || error.message || "Failed to exchange OAuth code",
+        });
+    }
+});
+
+/**
+ * Daily Calendar Sync - Runs automatically at 2 AM IST (8:30 PM UTC previous day)
+ * This function:
+ * 1. Uses admin's refresh token to get a fresh access token
+ * 2. Scrapes the .xlsx schedule from Google Drive
+ * 3. Updates Firestore with latest schedule data
+ * 4. Syncs all subscribed users' calendars
+ */
+exports.dailyCalendarSync = onSchedule({
+    schedule: "30 20 * * *", // 8:30 PM UTC = 2:00 AM IST
+    timeZone: "Asia/Kolkata",
+    memory: "512MiB",
+    timeoutSeconds: 540,
+}, async (event) => {
+    console.log("🕐 Starting DAILY calendar sync at", new Date().toISOString());
+
+    try {
+        const db = admin.firestore();
+
+        // 1. Load sheet configuration
+        console.log("📋 Loading sheet configuration...");
+        const configDoc = await db.collection("config").doc("settings").get();
+
+        if (!configDoc.exists) {
+            console.error("❌ Configuration not found");
+            return;
+        }
+
+        const config = configDoc.data();
+        const CURRENT_SHEET_ID = config.scheduleSheetId;
+        const sheetTabName = config.sheetTabName || DEFAULT_SHEET_NAME;
+
+        if (!CURRENT_SHEET_ID) {
+            console.error("❌ Sheet ID not configured");
+            return;
+        }
+
+        console.log(`📋 Using sheet ID: ${CURRENT_SHEET_ID}, tab: ${sheetTabName}`);
+
+        // 2. Get admin user's OAuth tokens
+        console.log("🔐 Loading admin credentials...");
+        const adminConfigDoc = await db.collection("config").doc("adminUser").get();
+
+        if (!adminConfigDoc.exists) {
+            console.error("❌ Admin user not configured. Admin needs to log in first.");
+            return;
+        }
+
+        const adminConfig = adminConfigDoc.data();
+        const refreshToken = adminConfig.oauthTokens?.refreshToken;
+
+        if (!refreshToken) {
+            console.error("❌ No refresh token found for admin. Admin needs to re-authenticate.");
+            return;
+        }
+
+        // 3. Use refresh token to get new access token
+        console.log("🔄 Refreshing admin access token...");
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.VITE_GOOGLE_CLIENT_ID,
+            process.env.VITE_GOOGLE_CLIENT_SECRET,
+        );
+
+        oauth2Client.setCredentials({
+            refresh_token: refreshToken,
+        });
+
+        let accessToken;
+        try {
+            const { credentials } = await oauth2Client.refreshAccessToken();
+            accessToken = credentials.access_token;
+
+            // Store the new access token
+            await db.collection("config").doc("adminUser").update({
+                "oauthTokens.accessToken": accessToken,
+                "oauthTokens.expiresAt": new Date(credentials.expiry_date),
+            });
+            console.log("✅ Access token refreshed successfully");
+        } catch (refreshError) {
+            console.error("❌ Failed to refresh access token:", refreshError.message);
+            console.error("   Admin needs to re-authenticate via the app");
+            return;
+        }
+
+        // 4. Fetch the sheet data
+        console.log("📊 Fetching sheet data...");
+        const auth = new google.auth.OAuth2();
+        auth.setCredentials({ access_token: accessToken });
+
+        const rawData = await fetchSheetData(auth, CURRENT_SHEET_ID, sheetTabName);
+        console.log(`📊 Fetched ${rawData.length} rows from sheet`);
+
+        // 5. Extract courses and events
+        const courses = extractCourses(rawData);
+        console.log(`📚 Found ${courses.length} unique courses`);
+
+        const allCourses = courses.map((c) => c.code);
+        const events = parseScheduleEvents(rawData, allCourses);
+        console.log(`📅 Parsed ${events.length} total events`);
+
+        // 6. Update Firestore
+        await db.collection("schedule").doc("courses").set({
+            courses,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        await db.collection("schedule").doc("events").set({
+            events: events.map((e) => ({
+                ...e,
+                date: e.date.toISOString(),
+            })),
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log("💾 Updated Firestore with latest schedule");
+
+        // 7. Sync all subscribed users' calendars
+        const usersSnapshot = await db.collection("users")
+            .where("isSynced", "==", true)
+            .where("syncEnabled", "!=", false)
+            .get();
+        console.log(`👥 Found ${usersSnapshot.size} users to sync`);
+
+        let successCount = 0;
+        let errorCount = 0;
+        const errors = [];
+
+        for (const userDoc of usersSnapshot.docs) {
+            const userData = userDoc.data();
+            try {
+                // Try to get/refresh user's access token
+                let userAccessToken = userData.oauthTokens?.accessToken;
+                const userRefreshToken = userData.oauthTokens?.refreshToken;
+                const userExpiresAt = userData.oauthTokens?.expiresAt?.toDate();
+
+                // Check if we need to refresh the token
+                if (!userAccessToken || (userExpiresAt && userExpiresAt < new Date())) {
+                    if (!userRefreshToken) {
+                        console.log(`⚠️ No refresh token for ${userData.email} - skipping`);
+                        errorCount++;
+                        errors.push({ email: userData.email, error: "No refresh token" });
+                        continue;
+                    }
+
+                    console.log(`🔄 Refreshing token for ${userData.email}`);
+                    try {
+                        userAccessToken = await refreshOAuthToken(userDoc.id, userRefreshToken);
+                    } catch (tokenError) {
+                        console.error(`❌ Token refresh failed for ${userData.email}:`, tokenError.message);
+                        // Mark user as needing re-authentication
+                        await db.collection("users").doc(userDoc.id).update({
+                            needsReauth: true,
+                            lastAuthError: tokenError.message,
+                        });
+                        errorCount++;
+                        errors.push({ email: userData.email, error: tokenError.message });
+                        continue;
+                    }
+                }
+
+                // Sync the user's calendar
+                const stats = await syncUserCalendar(userData, events, userAccessToken);
+                console.log(`✅ ${userData.email}: +${stats.created} events, -${stats.deleted} events`);
+                successCount++;
+
+            } catch (error) {
+                console.error(`❌ Failed to sync ${userData.email}:`, error.message);
+                errorCount++;
+                errors.push({ email: userData.email, error: error.message });
+            }
+        }
+
+        console.log("═══════════════════════════════════════════════════");
+        console.log(`🎉 Daily sync complete!`);
+        console.log(`   📊 Events: ${events.length} total`);
+        console.log(`   👥 Users: ${successCount} success, ${errorCount} failed`);
+        console.log("═══════════════════════════════════════════════════");
+
+        // Log sync results to Firestore for monitoring
+        await db.collection("syncLogs").add({
+            type: "daily",
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            eventsTotal: events.length,
+            coursesTotal: courses.length,
+            usersProcessed: usersSnapshot.size,
+            successCount,
+            errorCount,
+            errors: errors.slice(0, 10), // Store first 10 errors only
+        });
+
+    } catch (error) {
+        console.error("💥 Daily sync failed:", error);
+
+        // Log the error
+        const db = admin.firestore();
+        await db.collection("syncLogs").add({
+            type: "daily",
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            error: error.message,
+            success: false,
+        });
     }
 });
