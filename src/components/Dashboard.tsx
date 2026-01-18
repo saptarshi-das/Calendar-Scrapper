@@ -162,12 +162,19 @@ const Dashboard: React.FC<DashboardProps> = ({
 
                     <div className="sync-status">
                         <div className="status-indicator">
-                            <div className={`status-dot ${syncEnabled ? '' : 'status-dot-inactive'}`}></div>
-                            <span>{syncEnabled ? 'Auto-sync enabled' : 'Auto-sync disabled'}</span>
+                            {/* Only show blinking green dot if calendar is connected AND sync is enabled */}
+                            <div className={`status-dot ${(calendarConnected && syncEnabled) ? '' : 'status-dot-inactive'}`}></div>
+                            <span>
+                                {!calendarConnected && !isAdmin
+                                    ? 'Calendar not connected'
+                                    : syncEnabled
+                                        ? 'Auto-sync enabled'
+                                        : 'Auto-sync disabled'}
+                            </span>
                         </div>
 
-                        {/* Connect Calendar Button - Highly Recommended */}
-                        {onConnectCalendar && !calendarConnected && (
+                        {/* Connect Calendar Button - Highly Recommended (only for non-admin users) */}
+                        {onConnectCalendar && !calendarConnected && !isAdmin && (
                             <div className="connect-calendar-container" style={{
                                 display: 'flex',
                                 alignItems: 'center',
@@ -220,8 +227,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                             </div>
                         )}
 
-                        {/* Calendar Connected Success State */}
-                        {calendarConnected && (
+                        {/* Calendar Connected Success State (only for non-admin users) */}
+                        {calendarConnected && !isAdmin && (
                             <div className="connect-calendar-container" style={{
                                 display: 'flex',
                                 alignItems: 'center',
@@ -251,8 +258,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                         )}
 
                         {onToggleSync && (
-                            <div className="toggle-sync-container" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
-                                <span className="toggle-sync-hint" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '200px', textAlign: 'right' }}>
+                            <div className="toggle-sync-container" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '16px', marginTop: '12px' }}>
+                                <span className="toggle-sync-hint" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '180px', textAlign: 'right', lineHeight: '1.4' }}>
                                     {syncEnabled
                                         ? 'Stop receiving daily calendar updates (existing events will remain)'
                                         : 'Resume receiving daily calendar updates'}
@@ -261,7 +268,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                     className={`btn ${syncEnabled ? 'btn-secondary' : 'btn-primary'}`}
                                     onClick={onToggleSync}
                                     disabled={loading}
-                                    style={{ fontSize: '0.875rem' }}
+                                    style={{ fontSize: '0.875rem', whiteSpace: 'nowrap', minWidth: '120px' }}
                                 >
                                     {syncEnabled ? '🔕 Unsubscribe' : '🔔 Resubscribe'}
                                 </button>
