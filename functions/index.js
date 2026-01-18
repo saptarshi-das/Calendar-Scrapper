@@ -1203,7 +1203,7 @@ exports.exchangeOAuthCode = onRequest({
  * 4. Syncs all subscribed users' calendars
  */
 exports.dailyCalendarSync = onSchedule({
-    schedule: "30 20 * * *", // 8:30 PM UTC = 2:00 AM IST
+    schedule: "0 2 * * *", // 2:00 AM IST
     timeZone: "Asia/Kolkata",
     memory: "512MiB",
     timeoutSeconds: 540,
