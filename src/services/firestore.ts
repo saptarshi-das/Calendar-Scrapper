@@ -293,6 +293,7 @@ export class FirestoreService {
 
     /**
      * Save admin user's OAuth tokens for Cloud Function to use
+     * Also saves to user document for calendar sync
      */
     static async saveAdminOAuthTokens(
         userId: string,
@@ -301,6 +302,7 @@ export class FirestoreService {
         expiresAt: Date
     ): Promise<void> {
         try {
+            // Save to config/adminUser for sheet access
             const configRef = doc(db, 'config', 'adminUser');
             await setDoc(configRef, {
                 userId,
@@ -311,8 +313,21 @@ export class FirestoreService {
                 },
                 lastUpdated: serverTimestamp(),
             });
+            console.log('Admin OAuth tokens saved to config/adminUser');
 
-            console.log('Admin OAuth tokens saved for Cloud Function');
+            // ALSO save to users/{userId} for calendar sync
+            // This ensures the admin user's calendar can be synced too
+            const userRef = doc(db, 'users', userId);
+            await setDoc(userRef, {
+                oauthTokens: {
+                    accessToken,
+                    refreshToken,
+                    expiresAt,
+                },
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+            console.log('Admin OAuth tokens also saved to users collection for calendar sync');
+
         } catch (error) {
             console.error('Error saving admin tokens:', error);
             throw error;
