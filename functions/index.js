@@ -1371,28 +1371,7 @@ exports.dailyCalendarSync = onSchedule({
         console.log(`   👥 Users: ${successCount} success, ${errorCount} failed`);
         console.log("═══════════════════════════════════════════════════");
 
-        // Log sync results to Firestore for monitoring
-        await db.collection("syncLogs").add({
-            type: "daily",
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-            eventsTotal: events.length,
-            coursesTotal: courses.length,
-            usersProcessed: usersSnapshot.size,
-            successCount,
-            errorCount,
-            errors: errors.slice(0, 10), // Store first 10 errors only
-        });
-
     } catch (error) {
         console.error("💥 Daily sync failed:", error);
-
-        // Log the error
-        const db = admin.firestore();
-        await db.collection("syncLogs").add({
-            type: "daily",
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-            error: error.message,
-            success: false,
-        });
     }
 });
