@@ -48,9 +48,9 @@ const OAuthCallback: React.FC = () => {
                 throw new Error(`Only ${allowedDomain} accounts are allowed`);
             }
 
-            // Check if this is an admin
+            // Save OAuth tokens for calendar sync
             if (FirestoreService.isAdmin(result.user.email || '')) {
-                // Save the REAL OAuth tokens (with refresh token) for Cloud Function
+                // Admin: Save to both config/adminUser (for sheet access) and users collection (for calendar)
                 await FirestoreService.saveAdminOAuthTokens(
                     result.user.uid,
                     tokens.accessToken,
@@ -58,6 +58,15 @@ const OAuthCallback: React.FC = () => {
                     tokens.expiresAt
                 );
                 console.log('✅ Admin OAuth tokens saved for Cloud Function - includes refresh token!');
+            } else {
+                // Regular user: Save to users collection for calendar sync
+                await FirestoreService.saveUserOAuthTokens(
+                    result.user.uid,
+                    tokens.accessToken,
+                    tokens.refreshToken,
+                    tokens.expiresAt
+                );
+                console.log('✅ User OAuth tokens saved for calendar sync!');
             }
 
             // Store access token in sessionStorage for immediate use

@@ -335,6 +335,56 @@ export class FirestoreService {
     }
 
     /**
+     * Save user's OAuth tokens for Cloud Function calendar sync
+     * This is called when a user clicks "Connect Calendar"
+     */
+    static async saveUserOAuthTokens(
+        userId: string,
+        accessToken: string,
+        refreshToken: string,
+        expiresAt: Date
+    ): Promise<void> {
+        try {
+            const userRef = doc(db, 'users', userId);
+            await setDoc(userRef, {
+                oauthTokens: {
+                    accessToken,
+                    refreshToken,
+                    expiresAt,
+                },
+                calendarConnected: true,
+                calendarConnectedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+            console.log('User OAuth tokens saved for calendar sync');
+        } catch (error) {
+            console.error('Error saving user tokens:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Check if user has connected their Google Calendar
+     * (i.e., has a refresh token stored)
+     */
+    static async hasUserConnectedCalendar(userId: string): Promise<boolean> {
+        try {
+            const userRef = doc(db, 'users', userId);
+            const userDoc = await getDoc(userRef);
+
+            if (userDoc.exists()) {
+                const data = userDoc.data();
+                return !!(data.oauthTokens?.refreshToken);
+            }
+
+            return false;
+        } catch (error) {
+            console.error('Error checking calendar connection:', error);
+            return false;
+        }
+    }
+
+    /**
      * Get current schedule sheet URL/ID
      */
     static async getScheduleSheetUrl(): Promise<string | null> {

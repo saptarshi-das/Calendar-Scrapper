@@ -28,6 +28,8 @@ function App() {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [syncEnabled, setSyncEnabled] = useState(true);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [connectingCalendar, setConnectingCalendar] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -68,6 +70,10 @@ function App() {
           // Check sync subscription status
           const isSubscribed = await FirestoreService.isUserSubscribed(firebaseUser.uid);
           setSyncEnabled(isSubscribed);
+
+          // Check if user has connected their Google Calendar
+          const hasCalendarConnected = await FirestoreService.hasUserConnectedCalendar(firebaseUser.uid);
+          setCalendarConnected(hasCalendarConnected);
 
           await loadDashboardData(userSelection.selectedCourses);
         } else {
@@ -361,6 +367,28 @@ function App() {
     }
   };
 
+  const handleConnectCalendar = async () => {
+    try {
+      setConnectingCalendar(true);
+      setError(null);
+
+      // Import the OAuth service
+      const { GoogleOAuthService } = await import('./services/googleOAuth');
+
+      // Start the OAuth flow - this will redirect to Google
+      // After authorization, user will be redirected back to /oauth/callback
+      // The callback handler will save the tokens and redirect back here
+      await GoogleOAuthService.startOAuthFlow();
+
+      // Note: The page will redirect, so we won't reach this point
+      // The success state will be set after the callback
+    } catch (err: any) {
+      console.error('Error connecting calendar:', err);
+      setError(err.message || 'Failed to connect Google Calendar');
+      setConnectingCalendar(false);
+    }
+  };
+
   if (appState === 'loading') {
     return (
       <div className="app-loading">
@@ -473,9 +501,12 @@ function App() {
           onEditCourses={() => setAppState('select-courses')}
           onOpenSettings={() => setShowSettings(true)}
           onToggleSync={handleToggleSync}
+          onConnectCalendar={handleConnectCalendar}
           loading={loading}
           isAdmin={isAdmin}
           syncEnabled={syncEnabled}
+          calendarConnected={calendarConnected}
+          connectingCalendar={connectingCalendar}
         />
 
         {showSettings && isAdmin && (

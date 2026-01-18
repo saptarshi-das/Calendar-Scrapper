@@ -11,9 +11,12 @@ interface DashboardProps {
     onEditCourses: () => void;
     onOpenSettings?: () => void;
     onToggleSync?: () => void;
+    onConnectCalendar?: () => void;
     loading?: boolean;
     isAdmin?: boolean;
     syncEnabled?: boolean;
+    calendarConnected?: boolean;
+    connectingCalendar?: boolean;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
@@ -25,9 +28,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     onEditCourses,
     onOpenSettings,
     onToggleSync,
+    onConnectCalendar,
     loading,
     isAdmin,
     syncEnabled = true,
+    calendarConnected = false,
+    connectingCalendar = false,
 }) => {
     const activeEvents = scheduleEvents.filter(e => !e.isCancelled);
     const cancelledEvents = scheduleEvents.filter(e => e.isCancelled);
@@ -160,8 +166,92 @@ const Dashboard: React.FC<DashboardProps> = ({
                             <span>{syncEnabled ? 'Auto-sync enabled' : 'Auto-sync disabled'}</span>
                         </div>
 
+                        {/* Connect Calendar Button - Highly Recommended */}
+                        {onConnectCalendar && !calendarConnected && (
+                            <div className="connect-calendar-container" style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                padding: '12px 16px',
+                                backgroundColor: 'rgba(52, 211, 153, 0.1)',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(52, 211, 153, 0.3)',
+                                marginTop: '12px'
+                            }}>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                        <span style={{
+                                            fontSize: '0.65rem',
+                                            fontWeight: '600',
+                                            color: '#fff',
+                                            backgroundColor: '#10b981',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.5px'
+                                        }}>
+                                            Highly Recommended
+                                        </span>
+                                    </div>
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                        Connect your Google Calendar to receive automatic schedule updates, location changes, and professor updates directly on your calendar.
+                                    </span>
+                                </div>
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={onConnectCalendar}
+                                    disabled={connectingCalendar}
+                                    style={{
+                                        fontSize: '0.875rem',
+                                        whiteSpace: 'nowrap',
+                                        backgroundColor: '#10b981',
+                                        borderColor: '#10b981'
+                                    }}
+                                >
+                                    {connectingCalendar ? (
+                                        <>
+                                            <div className="spinner-small"></div>
+                                            Connecting...
+                                        </>
+                                    ) : (
+                                        <>🔗 Connect Calendar</>
+                                    )}
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Calendar Connected Success State */}
+                        {calendarConnected && (
+                            <div className="connect-calendar-container" style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                padding: '12px 16px',
+                                backgroundColor: 'rgba(52, 211, 153, 0.1)',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(52, 211, 153, 0.3)',
+                                marginTop: '12px'
+                            }}>
+                                <div style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    borderRadius: '50%',
+                                    backgroundColor: '#10b981',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                }}>
+                                    <span style={{ color: '#fff', fontSize: '14px' }}>✓</span>
+                                </div>
+                                <span style={{ fontSize: '0.875rem', color: '#10b981', fontWeight: '500' }}>
+                                    Google Calendar connected — You'll receive automatic schedule updates
+                                </span>
+                            </div>
+                        )}
+
                         {onToggleSync && (
-                            <div className="toggle-sync-container" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div className="toggle-sync-container" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
                                 <span className="toggle-sync-hint" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '200px', textAlign: 'right' }}>
                                     {syncEnabled
                                         ? 'Stop receiving daily calendar updates (existing events will remain)'
