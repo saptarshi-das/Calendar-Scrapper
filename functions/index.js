@@ -1068,12 +1068,19 @@ exports.manualSync = onCall({
             try {
                 let userAccessToken = userData.oauthTokens?.accessToken;
                 const userExpiresAt = userData.oauthTokens?.expiresAt?.toDate();
+                const userRefreshToken = userData.oauthTokens?.refreshToken;
+
+                // Check if user has connected their calendar (has refresh token)
+                if (!userRefreshToken) {
+                    console.log(`⏭️ Skipping ${userData.email} - no refresh token (needs to click Connect Calendar)`);
+                    continue;
+                }
 
                 if (!userAccessToken || (userExpiresAt && userExpiresAt < new Date())) {
                     console.log(`🔄 Refreshing token for ${userData.email}`);
                     userAccessToken = await refreshOAuthToken(
                         userDoc.id,
-                        userData.oauthTokens?.refreshToken,
+                        userRefreshToken,
                     );
                 }
 
