@@ -59,14 +59,33 @@ const OAuthCallback: React.FC = () => {
                 );
                 console.log('✅ Admin OAuth tokens saved for Cloud Function - includes refresh token!');
             } else {
-                // Regular user: Save to users collection for calendar sync
-                await FirestoreService.saveUserOAuthTokens(
-                    result.user.uid,
-                    tokens.accessToken,
-                    tokens.refreshToken,
-                    tokens.expiresAt
-                );
-                console.log('✅ User OAuth tokens saved for calendar sync!');
+                // Regular user: Call connectCalendarAndSync to clean old events and sync fresh ones
+                console.log('🔗 Calling connectCalendarAndSync for user...');
+
+                try {
+                    // Import Firebase Functions
+                    const { getFunctions, httpsCallable } = await import('firebase/functions');
+                    const functions = getFunctions();
+                    const connectCalendarAndSync = httpsCallable(functions, 'connectCalendarAndSync');
+
+                    const response = await connectCalendarAndSync({
+                        accessToken: tokens.accessToken,
+                        refreshToken: tokens.refreshToken,
+                        expiresAt: tokens.expiresAt.toISOString(),
+                    });
+
+                    const data = response.data as { success: boolean; message: string; stats: { deleted: number; created: number } };
+                    console.log('✅ Connect and sync complete:', data.message);
+                } catch (syncError: any) {
+                    console.error('⚠️ Connect and sync failed:', syncError.message);
+                    // Still save tokens so daily sync can try later
+                    await FirestoreService.saveUserOAuthTokens(
+                        result.user.uid,
+                        tokens.accessToken,
+                        tokens.refreshToken,
+                        tokens.expiresAt
+                    );
+                }
             }
 
             // Store access token in sessionStorage for immediate use
@@ -104,14 +123,14 @@ const OAuthCallback: React.FC = () => {
                         </div>
 
                         <h1 className="login-title">
-                            {status === 'processing' && 'Completing Sign In...'}
-                            {status === 'success' && 'Success!'}
-                            {status === 'error' && 'Authentication Failed'}
+                            {status === 'processing' && 'Connecting Calendar...'}
+                            {status === 'success' && 'Calendar Connected!'}
+                            {status === 'error' && 'Connection Failed'}
                         </h1>
 
                         <p className="login-subtitle">
-                            {status === 'processing' && 'Please wait while we finish setting up your account'}
-                            {status === 'success' && 'Redirecting you to the app...'}
+                            {status === 'processing' && 'Please wait while we sync your schedule to Google Calendar'}
+                            {status === 'success' && 'Your events are synced! Redirecting...'}
                             {status === 'error' && error}
                         </p>
                     </div>
