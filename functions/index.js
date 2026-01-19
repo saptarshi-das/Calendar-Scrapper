@@ -445,7 +445,8 @@ function extractCourses(rawData) {
         }
     }
 
-    return courses;
+    // Sort courses alphabetically by code
+    return courses.sort((a, b) => a.code.localeCompare(b.code));
 }
 
 /**
@@ -881,12 +882,15 @@ async function syncUserCalendar(user, allEvents, accessToken) {
  * Create ISO datetime string for calendar event
  */
 function createDateTime(date, time) {
-    const timeMatch = time.match(/(\d+):(\d+)(AM|PM)/);
-    if (!timeMatch) return new Date().toISOString();
+    const timeMatch = time.match(/(\d+):(\d+)(AM|PM)/i);
+    if (!timeMatch) {
+        console.error(`❌ createDateTime: Invalid time format "${time}" - falling back to current time!`);
+        return new Date().toISOString();
+    }
 
     let hours = parseInt(timeMatch[1]);
     const minutes = parseInt(timeMatch[2]);
-    const period = timeMatch[3];
+    const period = timeMatch[3].toUpperCase();
 
     if (period === "PM" && hours !== 12) hours += 12;
     if (period === "AM" && hours === 12) hours = 0;
@@ -1029,6 +1033,7 @@ exports.manualSync = onCall({
         // 4. Extract courses and events
         const courses = extractCourses(rawData);
         console.log(`📚 Found ${courses.length} unique courses`);
+        console.log(`📚 Course codes: ${courses.map(c => c.code).join(', ')}`);
 
         const allCourses = courses.map((c) => c.code);
         const events = parseScheduleEvents(rawData, allCourses);
