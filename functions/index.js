@@ -611,30 +611,81 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         const auth = new google.auth.OAuth2();
         auth.setCredentials({ access_token: accessToken });
 
-        // Use user's dedicated calendar or fall back to 'primary'
-        const calendarId = user.calendarId || "primary";
+        // Find the correct calendar ID - either stored ID or find by name
+        let calendarId = user.calendarId;
+
+        // If no calendar ID stored, or if stored calendar doesn't exist, find MBA calendar
+        if (!calendarId) {
+            // No calendar ID stored - need to search for MBA calendar
+            const calendarList = await calendar.calendarList.list({ auth });
+            const mbaCalendar = calendarList.data.items?.find(
+                cal => cal.summary?.toLowerCase().includes('mba') &&
+                    cal.summary?.toLowerCase().includes('term')
+            );
+
+            if (mbaCalendar) {
+                calendarId = mbaCalendar.id;
+                console.log(`   Found MBA calendar: ${mbaCalendar.summary} (${calendarId})`);
+
+                // Update the stored calendar ID in Firestore
+                const db = admin.firestore();
+                await db.collection("users").doc(user.uid || user.id).update({
+                    calendarId: calendarId,
+                });
+            } else {
+                throw new Error("No 'MBA term' calendar found. Please add events from the app first to create the calendar.");
+            }
+        }
+
+        // Try to verify the stored calendar exists
+        try {
+            await calendar.calendars.get({ auth, calendarId });
+        } catch (calendarError) {
+            console.log(`   Stored calendar ${calendarId} not found, searching for MBA calendar...`);
+
+            // Search for the calendar by name
+            const calendarList = await calendar.calendarList.list({ auth });
+            const mbaCalendar = calendarList.data.items?.find(
+                cal => cal.summary?.toLowerCase().includes('mba') &&
+                    cal.summary?.toLowerCase().includes('term')
+            );
+
+            if (mbaCalendar) {
+                calendarId = mbaCalendar.id;
+                console.log(`   Found MBA calendar: ${mbaCalendar.summary} (${calendarId})`);
+
+                // Update the stored calendar ID in Firestore
+                const db = admin.firestore();
+                await db.collection("users").doc(user.uid || user.id).update({
+                    calendarId: calendarId,
+                });
+            } else {
+                // No MBA calendar found - user needs to set up calendar first via frontend
+                throw new Error("No 'MBA term' calendar found. Please add events from the app first to create the calendar.");
+            }
+        }
+
         console.log(`   Using calendar: ${calendarId}`);
 
         // Get existing events created by this app
-        // Use start of today (in IST) to include today's past events for location updates
-        const now = new Date();
-        const startOfToday = new Date(now);
-        startOfToday.setHours(0, 0, 0, 0);
-
+        // Look at ALL events from term start to 3 months from now
+        // This ensures we can clean up old wrong events
+        const termStart = new Date('2025-12-29');  // Start of Term 6
         const threeMonthsFromNow = new Date();
-        threeMonthsFromNow.setMonth(now.getMonth() + 3);
+        threeMonthsFromNow.setMonth(threeMonthsFromNow.getMonth() + 3);
 
         const existingEventsRes = await calendar.events.list({
             auth,
             calendarId: calendarId,
-            timeMin: startOfToday.toISOString(),
+            timeMin: termStart.toISOString(),
             timeMax: threeMonthsFromNow.toISOString(),
-            privateExtendedProperty: [`appCreated=true`],
+            // NOTE: Don't filter by appCreated - frontend events don't have this marker
+            // We'll match by summary (title) + date + time instead
             maxResults: 2500,
         });
 
         const existingEvents = existingEventsRes.data.items || [];
-        console.log(`   Found ${existingEvents.length} existing calendar events from today onwards`);
+        console.log(`   Found ${existingEvents.length} existing calendar events`);
 
         // Build two maps for existing events:
         // 1. By full scheduleEventId (for exact match)
@@ -840,19 +891,39 @@ async function syncUserCalendar(user, allEvents, accessToken) {
             const scheduleId = existingEvent.extendedProperties?.private?.scheduleEventId;
             const courseCode = existingEvent.extendedProperties?.private?.courseCode;
 
-            // Check if this event's base key is in the new events
+            // 1. Check if this event matches a new event by scheduleId
+            if (scheduleId && newEventsMap.has(scheduleId)) {
+                return false;  // Exact match, keep it
+            }
+
+            // 2. Check if this event matches a new event by base key (courseCode-date-time)
             if (courseCode && existingEvent.start?.dateTime) {
                 const eventDate = new Date(existingEvent.start.dateTime);
                 const dateStr = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
                 const timeStr = `${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
                 const baseKey = `${courseCode}-${dateStr}-${timeStr}`;
-                // If base key exists in new events, this event should be updated, not deleted
+
                 if (newBaseKeys.has(baseKey)) {
-                    return false;
+                    return false;  // Base key match, keep it (will be updated if needed)
                 }
             }
 
-            return scheduleId && !newEventsMap.has(scheduleId);
+            // 3. Check if this event is for a course the user still has selected
+            // If the courseCode doesn't match any of user's selected courses, delete it
+            if (courseCode && !user.selectedCourses?.includes(courseCode)) {
+                console.log(`   Will delete: ${existingEvent.summary} - course not selected`);
+                return true;  // Course not selected anymore, delete
+            }
+
+            // 4. If we have a scheduleId but it's not in new events, delete it
+            // This means the schedule changed and this event no longer exists
+            if (scheduleId) {
+                console.log(`   Will delete: ${existingEvent.summary} - not in schedule anymore`);
+                return true;
+            }
+
+            // 5. If event has appCreated=true but no scheduleId, it's an orphan - delete it
+            return true;
         });
 
         for (let i = 0; i < eventsToDelete.length; i += BATCH_SIZE) {
@@ -880,12 +951,15 @@ async function syncUserCalendar(user, allEvents, accessToken) {
 
 /**
  * Create ISO datetime string for calendar event
+ * Returns local datetime string (without Z) so Google Calendar uses the timeZone field
  */
 function createDateTime(date, time) {
     const timeMatch = time.match(/(\d+):(\d+)(AM|PM)/i);
     if (!timeMatch) {
         console.error(`❌ createDateTime: Invalid time format "${time}" - falling back to current time!`);
-        return new Date().toISOString();
+        // Return current time in IST format
+        const now = new Date();
+        return formatLocalDateTime(now);
     }
 
     let hours = parseInt(timeMatch[1]);
@@ -895,9 +969,32 @@ function createDateTime(date, time) {
     if (period === "PM" && hours !== 12) hours += 12;
     if (period === "AM" && hours === 12) hours = 0;
 
-    const dateTime = new Date(date);
-    dateTime.setHours(hours, minutes, 0, 0);
-    return dateTime.toISOString();
+    // Create date object from the input date
+    const inputDate = new Date(date);
+
+    // Build the datetime string in local format (no Z suffix)
+    // This allows Google Calendar to interpret it using the timeZone field we provide
+    const year = inputDate.getFullYear();
+    const month = String(inputDate.getMonth() + 1).padStart(2, '0');
+    const day = String(inputDate.getDate()).padStart(2, '0');
+    const hourStr = String(hours).padStart(2, '0');
+    const minuteStr = String(minutes).padStart(2, '0');
+
+    // Return ISO 8601 format WITHOUT timezone suffix
+    // Google Calendar will interpret this using the timeZone: "Asia/Kolkata" we specify
+    return `${year}-${month}-${day}T${hourStr}:${minuteStr}:00`;
+}
+
+/**
+ * Helper to format date as local ISO string
+ */
+function formatLocalDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}:00`;
 }
 
 /**
