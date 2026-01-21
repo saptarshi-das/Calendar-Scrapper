@@ -709,7 +709,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                     const timeStr = `${eventDate.getHours()}:${String(eventDate.getMinutes()).padStart(2, '0')}`;
                     const baseKey = `${courseCode}-${dateStr}-${timeStr}`;
                     existingEventsByBaseKey.set(baseKey, e);
-                    console.log(`   Existing event baseKey: ${baseKey}, location: ${e.location || 'N/A'}`);
+                    // Removed verbose logging - only log summaries
                 }
             }
 
@@ -741,7 +741,7 @@ async function syncUserCalendar(user, allEvents, accessToken) {
         let updated = 0;
         let deleted = 0;
 
-        const BATCH_SIZE = 5;
+        const BATCH_SIZE = 25;  // Process 25 events per batch for optimal speed/safety
 
         // Process events: create new ones and update existing ones with changed details
         const eventsToCreate = [];
@@ -754,7 +754,6 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 if (exactMatch.location !== event.location ||
                     !exactMatch.description?.includes(event.professor)) {
                     eventsToUpdate.push({ existing: exactMatch, new: event });
-                    console.log(`   Will update (exact match, details changed): ${event.courseCode} - ${event.location}`);
                 }
             } else {
                 // No exact match - check if there's an event with same base key but different location
@@ -768,18 +767,15 @@ async function syncUserCalendar(user, allEvents, accessToken) {
                 if (baseMatch) {
                     // Location changed - update the existing event
                     eventsToUpdate.push({ existing: baseMatch, new: event });
-                    console.log(`   Will update (location changed): ${event.courseCode} from ${baseMatch.location} to ${event.location}`);
                 } else {
                     // Try fallback: match by summary (title) + date + time
                     const summaryKey = `${event.courseName}-${event.section}-${dateStr}-${timeStr}`;
                     const summaryMatch = existingEventsBySummaryKey.get(summaryKey);
                     if (summaryMatch) {
                         eventsToUpdate.push({ existing: summaryMatch, new: event });
-                        console.log(`   Will update (fallback match by title): ${event.courseCode} from ${summaryMatch.location} to ${event.location}`);
                     } else {
                         // Truly new event
                         eventsToCreate.push(event);
-                        console.log(`   Will create new: ${event.courseCode} - ${event.location} (baseKey: ${baseKey})`);
                     }
                 }
             }
@@ -1529,7 +1525,7 @@ exports.connectCalendarAndSync = onCall({
         }, { merge: true });
         console.log(`✅ Saved OAuth tokens for ${userEmail}`);
 
-        // 2. Get user's calendar ID and selected courses
+        // 2. Get user's data
         const userDoc = await userRef.get();
         const userData = userDoc.data();
 
@@ -1537,50 +1533,9 @@ exports.connectCalendarAndSync = onCall({
             throw new Error("No courses selected. Please select courses first.");
         }
 
-        const calendarId = userData.calendarId || "primary";
-        console.log(`📅 Using calendar: ${calendarId}`);
+        console.log(`📅 User has ${userData.selectedCourses.length} courses selected`);
 
-        // 3. Initialize Google Calendar API
-        const calendar = google.calendar({ version: "v3" });
-        const auth = new google.auth.OAuth2();
-        auth.setCredentials({ access_token: accessToken });
-
-        // 4. Delete ALL existing app-created events
-        console.log(`🧹 Cleaning up old events...`);
-        let deletedCount = 0;
-        let pageToken = null;
-
-        do {
-            const existingEvents = await calendar.events.list({
-                auth,
-                calendarId: calendarId,
-                privateExtendedProperty: "appCreated=true",
-                maxResults: 250,
-                pageToken: pageToken,
-            });
-
-            const events = existingEvents.data.items || [];
-
-            // Delete events in batches
-            for (const event of events) {
-                try {
-                    await calendar.events.delete({
-                        auth,
-                        calendarId: calendarId,
-                        eventId: event.id,
-                    });
-                    deletedCount++;
-                } catch (deleteError) {
-                    console.warn(`Failed to delete event ${event.id}:`, deleteError.message);
-                }
-            }
-
-            pageToken = existingEvents.data.nextPageToken;
-        } while (pageToken);
-
-        console.log(`🧹 Deleted ${deletedCount} old events`);
-
-        // 5. Get fresh events from Firestore
+        // 3. Get fresh events from Firestore
         const eventsDoc = await db.collection("schedule").doc("events").get();
         if (!eventsDoc.exists) {
             throw new Error("No schedule data available. Admin needs to sync first.");
@@ -1591,69 +1546,29 @@ exports.connectCalendarAndSync = onCall({
             date: new Date(e.date),
         }));
 
-        // Filter events for user's courses and exclude cancelled
-        const userEvents = allEvents.filter((event) =>
-            userData.selectedCourses.includes(event.courseCode) &&
-            !event.isCancelled
-        );
+        console.log(`📊 Total events in schedule: ${allEvents.length}`);
 
-        console.log(`📊 Found ${userEvents.length} events for user's courses`);
+        // 4. Use syncUserCalendar to handle everything intelligently
+        // This will:
+        // - Find the correct calendar (or create if needed)
+        // - Match existing events (frontend or Cloud Function created)
+        // - Update changed events
+        // - Delete events that shouldn't exist
+        // - Create truly new events
+        // - NO DUPLICATES!
+        console.log(`🔄 Syncing calendar...`);
+        const stats = await syncUserCalendar(userData, allEvents, accessToken);
 
-        // 6. Create fresh calendar events
-        let createdCount = 0;
-        const BATCH_SIZE = 10;
-
-        for (let i = 0; i < userEvents.length; i += BATCH_SIZE) {
-            const batch = userEvents.slice(i, i + BATCH_SIZE);
-            await Promise.all(batch.map(async (event) => {
-                try {
-                    await calendar.events.insert({
-                        auth,
-                        calendarId: calendarId,
-                        resource: {
-                            summary: `${event.courseName}-${event.section}`,
-                            location: event.location,
-                            description: `Professor: ${event.professor}\nLocation: ${event.location}\nWeek: ${event.week}`,
-                            start: {
-                                dateTime: createDateTime(event.date, event.timeSlot.start),
-                                timeZone: "Asia/Kolkata",
-                            },
-                            end: {
-                                dateTime: createDateTime(event.date, event.timeSlot.end),
-                                timeZone: "Asia/Kolkata",
-                            },
-                            colorId: "9",
-                            reminders: {
-                                useDefault: false,
-                                overrides: [
-                                    { method: "popup", minutes: 10 },
-                                ],
-                            },
-                            extendedProperties: {
-                                private: {
-                                    scheduleEventId: event.id,
-                                    courseCode: event.courseCode,
-                                    appCreated: "true",
-                                },
-                            },
-                        },
-                    });
-                    createdCount++;
-                } catch (createError) {
-                    console.error(`Failed to create event:`, createError.message);
-                }
-            }));
-        }
-
-        console.log(`✅ Created ${createdCount} fresh events`);
+        console.log(`✅ ${userEmail}: Calendar connected and synced!`);
+        console.log(`   Created: ${stats.created}, Updated: ${stats.updated}, Deleted: ${stats.deleted}`);
         console.log(`🎉 Calendar connected successfully for ${userEmail}!`);
 
         return {
             success: true,
-            message: `Calendar connected! Cleaned ${deletedCount} old events and added ${createdCount} fresh events.`,
+            message: `Calendar connected! Cleaned ${stats.deleted} old events and added ${stats.created} fresh events.`,
             stats: {
-                deleted: deletedCount,
-                created: createdCount,
+                deleted: stats.deleted,
+                created: stats.created,
             },
         };
 
