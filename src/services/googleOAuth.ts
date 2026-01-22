@@ -7,11 +7,10 @@
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const REDIRECT_URI = `${window.location.origin}/oauth/callback`;
 
-// Scopes needed for the app
+// Scopes needed for the app (non-admin users)
+// Note: spreadsheets and drive access removed - only admin needs these for scraping
 const SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets.readonly',
     'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/drive.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
 ].join(' ');
