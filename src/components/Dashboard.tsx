@@ -1,6 +1,7 @@
 import React from 'react';
 import type { User, ScheduleEvent } from '../types';
 import './Dashboard.css';
+import Footer from './Footer';
 
 interface DashboardProps {
     user: User;
@@ -368,6 +369,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </div>
             </main>
+            <Footer />
         </div>
     );
 };

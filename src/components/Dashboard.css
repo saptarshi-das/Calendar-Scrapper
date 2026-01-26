@@ -1,6 +1,8 @@
 .dashboard {
     min-height: 100vh;
     background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
 }
 
 .dashboard-header {
@@ -42,6 +44,7 @@
 
 .dashboard-main {
     padding-bottom: var(--spacing-2xl);
+    flex: 1;
 }
 
 /* Stats Grid */
