@@ -19,7 +19,7 @@ A modern web application that automatically syncs course schedules from Google S
 - **Informed Decisions**: View all your classes organized by date
 
 ### **🔄 Automated Daily Sync**
-- Cloud function runs daily at 11:00 PM IST
+- Cloud function runs daily at 2:00AM IST
 - Admin's sheet scraping updates Firestore
 - All users' calendars automatically updated
 - No manual intervention needed after initial setup
