@@ -1,6 +1,5 @@
 import React from 'react';
 import './LoginPage.css';
-import Footer from './Footer';
 
 interface LoginPageProps {
     onLogin: () => void;
@@ -119,7 +118,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, loading }) => {
                     </p>
                 </div>
             </div>
-            <Footer />
+
         </div>
     );
 };

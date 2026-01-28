@@ -12,7 +12,6 @@ import { GoogleCalendarService } from './services/googleCalendar';
 import { FirestoreService } from './services/firestore';
 import './index.css';
 import './App.css';
-import Footer from './components/Footer';
 
 type AppState = 'loading' | 'login' | 'select-courses' | 'preview' | 'dashboard';
 
@@ -457,7 +456,7 @@ function App() {
           <AdminSettings onClose={() => setShowSettings(false)} />
         )}
 
-        <Footer />
+
       </div>
     );
   }
@@ -489,7 +488,7 @@ function App() {
           </div>
         )}
 
-        <Footer />
+
       </div>
     );
   }
