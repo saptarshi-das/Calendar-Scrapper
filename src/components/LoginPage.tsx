@@ -38,7 +38,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, loading }) => {
                             </svg>
                         </div>
 
-                        <h1 className="login-title">Course Schedule Sync</h1>
+                        <h1 className="login-title">Calendar Scrapper</h1>
                         <p className="login-subtitle">
                             Automatically sync your course schedule to Google Calendar
                         </p>

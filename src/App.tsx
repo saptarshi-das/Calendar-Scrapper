@@ -418,7 +418,7 @@ function App() {
         <header className="app-header">
           <div className="header-content">
             <div>
-              <h1 className="header-title">Course Schedule Sync</h1>
+              <h1 className="header-title">Calendar Scrapper</h1>
               {isAdmin && (
                 <span className="admin-badge badge badge-warning">Admin</span>
               )}
@@ -467,7 +467,7 @@ function App() {
       <div className="app-container">
         <header className="app-header">
           <div className="header-content">
-            <h1 className="header-title">Course Schedule Sync</h1>
+            <h1 className="header-title">Calendar Scrapper</h1>
             <button className="btn btn-secondary" onClick={handleLogout}>
               Logout
             </button>
