@@ -70,6 +70,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, loading }) => {
                         </div>
                     </div>
 
+                    <p className="made-by-text">
+                        Made by Saptarshi Das
+                    </p>
+
                     <button
                         className="btn btn-primary login-button"
                         onClick={onLogin}

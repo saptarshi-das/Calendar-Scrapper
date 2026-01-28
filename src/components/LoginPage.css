@@ -114,8 +114,16 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-lg);
-    margin-bottom: var(--spacing-2xl);
+    margin-bottom: var(--spacing-lg);
     text-align: left;
+}
+
+.made-by-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: var(--spacing-lg);
+    font-weight: 500;
+    opacity: 0.8;
 }
 
 .feature-item {
