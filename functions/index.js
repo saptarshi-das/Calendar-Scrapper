@@ -338,14 +338,20 @@ function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, 
 
         // **NEW: First try combined section format: CourseName-A and B (Location)**
         // This detects patterns like "SA-A and B (PT-2-4)" and matches for users who selected SA-A or SA-B
+        if (line.includes('SA') && line.includes('and')) {
+            console.log('🔍 Line with SA and "and":', JSON.stringify(line));
+        }
         const combinedSectionMatch = line.match(/([A-Z][A-Za-z0-9\&-]+)-([A-Z])\s+and\s+([A-Z])\s*\(([^)]+)\)/i);
 
         if (combinedSectionMatch) {
+            console.log('✅ Found combined section in event parsing!', combinedSectionMatch[0]);
             const [, baseCourseName, firstSection, secondSection, combinedLocation] = combinedSectionMatch;
 
             // Check if user selected either section
             const firstCode = `${baseCourseName}-${firstSection}`;
             const secondCode = `${baseCourseName}-${secondSection}`;
+            console.log(`  Checking if user selected ${firstCode} or ${secondCode}`);
+            console.log(`  User's selected courses:`, selectedCourses);
 
             let matchedCode, matchedSection;
 
@@ -353,8 +359,11 @@ function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, 
                 matchedCode = firstCode;
                 matchedSection = firstSection;
             } else if (selectedCourses.includes(secondCode)) {
+                console.log(`  User has ${secondCode} selected!`);
                 matchedCode = secondCode;
                 matchedSection = secondSection;
+            } else {
+                console.log(`  User doesn't have ${firstCode} or ${secondCode} selected`);
             }
 
             // If user selected either section, create the event
@@ -440,14 +449,22 @@ function extractCourses(rawData) {
         for (let j = 2; j < row.length; j++) {
             const cell = asString(row[j]);
             if (cell) {
+                let foundCombinedSection = false;
+
                 // **NEW: Match combined section courses: CourseName-A and B (Location)**
                 // This detects patterns like "SA-A and B (PT-2-4)" and creates separate entries for SA-A and SA-B
+                if (cell.includes('SA') && cell.includes('and')) {
+                    console.log('🔍 Cell with SA and "and":', JSON.stringify(cell));
+                }
                 const combinedSectionMatches = cell.match(/([A-Z][A-Za-z0-9\&-]+)-([A-Z])\s+and\s+([A-Z])\s*\(([^)]+)\)/gi);
                 if (combinedSectionMatches) {
+                    console.log('✅ Found combined section match!', combinedSectionMatches);
+                    foundCombinedSection = true;
                     combinedSectionMatches.forEach((match) => {
                         const courseMatch = match.match(/([A-Z][A-Za-z0-9\&-]+)-([A-Z])\s+and\s+([A-Z])\s*\(([^)]+)\)/i);
                         if (courseMatch) {
                             const [, courseName, firstSection, secondSection] = courseMatch;
+                            console.log(`  Creating: ${courseName}-${firstSection} and ${courseName}-${secondSection}`);
 
                             // Create entry for first section (e.g., SA-A)
                             const firstCode = `${courseName}-${firstSection}`;
@@ -479,26 +496,29 @@ function extractCourses(rawData) {
                 }
 
                 // Match multi-section courses: CourseName-A (Location)
-                const multiSectionMatches = cell.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/g);
-                if (multiSectionMatches) {
-                    multiSectionMatches.forEach((match) => {
-                        const courseMatch = match.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
-                        if (courseMatch) {
-                            const [, courseName, section] = courseMatch;
-                            const code = `${courseName}-${section}`;
+                // Skip this if we already found a combined section in this cell
+                if (!foundCombinedSection) {
+                    const multiSectionMatches = cell.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/g);
+                    if (multiSectionMatches) {
+                        multiSectionMatches.forEach((match) => {
+                            const courseMatch = match.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
+                            if (courseMatch) {
+                                const [, courseName, section] = courseMatch;
+                                const code = `${courseName}-${section}`;
 
-                            if (!coursesSet.has(code)) {
-                                coursesSet.add(code);
-                                courses.push({
-                                    id: code.replace(/\s+/g, "-").toLowerCase(),
-                                    code: code,
-                                    name: courseName,
-                                    section: section,
-                                    location: "",
-                                });
+                                if (!coursesSet.has(code)) {
+                                    coursesSet.add(code);
+                                    courses.push({
+                                        id: code.replace(/\s+/g, "-").toLowerCase(),
+                                        code: code,
+                                        name: courseName,
+                                        section: section,
+                                        location: "",
+                                    });
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
                 }
 
                 // Match single-section courses: CourseName (Location) - e.g., SHRM, CSM, I4TS
