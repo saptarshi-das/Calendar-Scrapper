@@ -336,6 +336,51 @@ function parseCellEvents(cellValue, week, day, date, timeSlot, selectedCourses, 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
 
+        // **NEW: First try combined section format: CourseName-A and B (Location)**
+        // This detects patterns like "SA-A and B (PT-2-4)" and matches for users who selected SA-A or SA-B
+        const combinedSectionMatch = line.match(/([A-Z][A-Za-z0-9\&-]+)-([A-Z])\s+and\s+([A-Z])\s*\(([^)]+)\)/i);
+
+        if (combinedSectionMatch) {
+            const [, baseCourseName, firstSection, secondSection, combinedLocation] = combinedSectionMatch;
+
+            // Check if user selected either section
+            const firstCode = `${baseCourseName}-${firstSection}`;
+            const secondCode = `${baseCourseName}-${secondSection}`;
+
+            let matchedCode, matchedSection;
+
+            if (selectedCourses.includes(firstCode)) {
+                matchedCode = firstCode;
+                matchedSection = firstSection;
+            } else if (selectedCourses.includes(secondCode)) {
+                matchedCode = secondCode;
+                matchedSection = secondSection;
+            }
+
+            // If user selected either section, create the event
+            if (matchedCode && matchedSection) {
+                const professor = professorLines[lineIndex] || professorLines[0] || "";
+                const event = {
+                    id: `${matchedCode}-${combinedLocation}-${date.toISOString()}-${timeSlot.start}`,
+                    courseCode: matchedCode,
+                    courseName: baseCourseName,
+                    section: matchedSection,
+                    location: combinedLocation,
+                    professor: professor.trim(),
+                    date,
+                    timeSlot,
+                    week,
+                    day,
+                    status: isCancelled ? "cancelled" : "active",
+                    isCancelled: isCancelled,
+                    isRed: isCancelled,
+                    hasStrikethrough: isCancelled,
+                };
+                events.push(event);
+                continue; // Skip to next line since we handled this one
+            }
+        }
+
         // Try multi-section format first: CourseName-A (Location)
         let courseMatch = line.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/);
         let courseName, section, location, courseCode;
@@ -392,6 +437,44 @@ function extractCourses(rawData) {
         for (let j = 2; j < row.length; j++) {
             const cell = asString(row[j]);
             if (cell) {
+                // **NEW: Match combined section courses: CourseName-A and B (Location)**
+                // This detects patterns like "SA-A and B (PT-2-4)" and creates separate entries for SA-A and SA-B
+                const combinedSectionMatches = cell.match(/([A-Z][A-Za-z0-9\&-]+)-([A-Z])\s+and\s+([A-Z])\s*\(([^)]+)\)/gi);
+                if (combinedSectionMatches) {
+                    combinedSectionMatches.forEach((match) => {
+                        const courseMatch = match.match(/([A-Z][A-Za-z0-9\&-]+)-([A-Z])\s+and\s+([A-Z])\s*\(([^)]+)\)/i);
+                        if (courseMatch) {
+                            const [, courseName, firstSection, secondSection] = courseMatch;
+
+                            // Create entry for first section (e.g., SA-A)
+                            const firstCode = `${courseName}-${firstSection}`;
+                            if (!coursesSet.has(firstCode)) {
+                                coursesSet.add(firstCode);
+                                courses.push({
+                                    id: firstCode.replace(/\s+/g, "-").toLowerCase(),
+                                    code: firstCode,
+                                    name: courseName,
+                                    section: firstSection,
+                                    location: "",
+                                });
+                            }
+
+                            // Create entry for second section (e.g., SA-B)
+                            const secondCode = `${courseName}-${secondSection}`;
+                            if (!coursesSet.has(secondCode)) {
+                                coursesSet.add(secondCode);
+                                courses.push({
+                                    id: secondCode.replace(/\s+/g, "-").toLowerCase(),
+                                    code: secondCode,
+                                    name: courseName,
+                                    section: secondSection,
+                                    location: "",
+                                });
+                            }
+                        }
+                    });
+                }
+
                 // Match multi-section courses: CourseName-A (Location)
                 const multiSectionMatches = cell.match(/([A-Z][A-Za-z0-9&-]+)-([A-Z])\s*\(([^)]+)\)/g);
                 if (multiSectionMatches) {
