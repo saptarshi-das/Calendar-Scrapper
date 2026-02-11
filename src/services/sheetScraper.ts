@@ -427,6 +427,9 @@ export class SheetScraperService {
                     events.push(event);
                     continue; // Skip to next line since we handled this one
                 }
+                // Skip regular parsing for this line since it's a combined section
+                // (even if user didn't select it, we don't want to parse it as regular SA-A)
+                continue;
             }
 
             // Try multi-section format first: CourseName-A (Location)
