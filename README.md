@@ -1,4 +1,4 @@
-# 📅 Course Schedule Sync - Calendar Scrapper
+# 📅 Course Schedule Sync - Calendar Scraper
 
 A modern web application that automatically syncs course schedules from Google Sheets to Google Calendar with real-time updates and cancellation alerts.
 

@@ -43,7 +43,7 @@ Before starting, make sure you have:
 2. Click "Create Credentials" → "OAuth 2.0 Client ID"
 3. Configure consent screen (if needed):
    - User Type: **Internal**
-   - App name: "Calendar Scrapper"
+   - App name: "Calendar Scraper"
    - Add `iimranchi.ac.in` to authorized domains
 4. Create OAuth Client:
    - Type: **Web application**

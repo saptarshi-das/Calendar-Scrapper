@@ -6,7 +6,7 @@
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click "Add project"
-3. Name: "Calendar Scrapper" (or your choice)
+3. Name: "Calendar Scraper" (or your choice)
 4. Enable Google Analytics (optional)
 5. Create project
 
@@ -58,7 +58,7 @@ service cloud.firestore {
 1. Go to Project Settings (gear icon)
 2. Scroll to "Your apps"
 3. Click web icon (`</>`)
-4. Register app name: "Calendar Scrapper Web"
+4. Register app name: "Calendar Scraper Web"
 5. Copy the Firebase configuration object
 
 ## Phase 2: Google Cloud Console Setup
@@ -79,12 +79,12 @@ service cloud.firestore {
 2. Click "Create Credentials" → "OAuth 2.0 Client ID"
 3. Configure consent screen if prompted:
    - User Type: **Internal**
-   - App name: "Calendar Scrapper"
+   - App name: "Calendar Scraper"
    - User support email: your email
    - Authorized domains: `iimranchi.ac.in`
 4. Create OAuth Client ID:
    - Application type: **Web application**
-   - Name: "Calendar Scrapper Web Client"
+   - Name: "Calendar Scraper Web Client"
    - Authorized JavaScript origins:
      - `http://localhost:5173`
      - Your deployment URL (e.g., `https://your-app.vercel.app`)

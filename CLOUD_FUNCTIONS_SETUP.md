@@ -1,6 +1,6 @@
 # ☁️ Cloud Functions Setup Guide
 
-This guide will help you set up the daily automated sync for the Calendar Scrapper application.
+This guide will help you set up the daily automated sync for the Calendar Scraper application.
 
 ## Overview
 
