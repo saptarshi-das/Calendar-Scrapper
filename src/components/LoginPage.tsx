@@ -70,7 +70,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLogin, loading }) => {
                     </div>
 
                     <p className="made-by-text">
-                        Made by Group 8
+                        Made by Saptarshi Das
                     </p>
 
                     <button
